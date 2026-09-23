@@ -229,8 +229,8 @@ func TestBanner(t *testing.T) {
 	}
 	buf.Reset()
 	_ = Banner(&buf, "v1.2.3", true)
-	if !strings.Contains(buf.String(), "\x1b[1;38;5;51m") || !strings.Contains(buf.String(), "\x1b[1;38;5;99m") {
-		t.Fatalf("color banner lacks the gradient: %q", buf.String())
+	if strings.Count(buf.String(), "\x1b[1;38;5;25m") != 3 || strings.Count(buf.String(), "\x1b[1;38;5;220m") != 2 {
+		t.Fatalf("banner is not blue over yellow: %q", buf.String())
 	}
 	if err := Banner(failWriter{}, "v", true); err == nil {
 		t.Fatal("write error not reported")

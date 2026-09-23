@@ -14,17 +14,25 @@ var bannerLines = []string{
 	`|___/_| |_|\___|_|_|\___|_|\___|\__,_|_|`,
 }
 
-// bannerGradient is a 256-color ramp from cyan to violet, one per line.
-var bannerGradient = []int{51, 45, 39, 69, 99}
+// Colors of the Ukrainian flag in the 256-color palette: blue 25 (#005FAF,
+// the closest to #0057B7) and yellow 220 (#FFD700).
+const (
+	flagBlue   = 25
+	flagYellow = 220
+)
+
+// bannerColors paints the upper half of the letters blue and the lower half
+// yellow, like the flag.
+var bannerColors = []int{flagBlue, flagBlue, flagBlue, flagYellow, flagYellow}
 
 // Banner writes the logo with the version on its last line. With color on,
-// each line gets the next color of a cyan-to-violet gradient.
+// the logo is drawn in the colors of the Ukrainian flag.
 func Banner(w io.Writer, version string, color bool) error {
 	var b strings.Builder
 	b.WriteByte('\n')
 	for i, line := range bannerLines {
 		if color {
-			fmt.Fprintf(&b, "\x1b[1;38;5;%dm%s\x1b[0m", bannerGradient[i], line)
+			fmt.Fprintf(&b, "\x1b[1;38;5;%dm%s\x1b[0m", bannerColors[i], line)
 		} else {
 			b.WriteString(line)
 		}
