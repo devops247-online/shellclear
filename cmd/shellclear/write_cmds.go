@@ -153,6 +153,7 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 
 	touched := map[history.Shell]bool{}
 	remaining := 0
+	defer a.invalidateCache(g)
 	for _, p := range plans {
 		out, err := cl.Apply(p)
 		if err != nil {
@@ -203,6 +204,7 @@ func (a *App) cmdStash(g *globals, args []string) (int, error) {
 		return exitError, err
 	}
 	ops := a.ops(g)
+	defer a.invalidateCache(g)
 	// Check every file first, so a conflict on the second file does not
 	// leave the first one stashed.
 	st := a.stateDir(g)
@@ -244,6 +246,7 @@ func (a *App) cmdPop(g *globals, args []string) (int, error) {
 		return exitError, err
 	}
 	ops := a.ops(g)
+	defer a.invalidateCache(g)
 	popped := 0
 	for _, f := range files {
 		res, err := ops.Pop(f)
@@ -332,6 +335,7 @@ func (a *App) cmdRestore(g *globals, args []string) (int, error) {
 	if err != nil {
 		return exitError, err
 	}
+	defer a.invalidateCache(g)
 	res, err := a.ops(g).Restore(b)
 	if err != nil {
 		return exitError, err

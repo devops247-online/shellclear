@@ -30,6 +30,7 @@ type App struct {
 	Env            history.Env
 	StdoutIsTTY    bool
 	StdinIsTTY     bool
+	StderrIsTTY    bool
 	Location       *time.Location
 	Now            func() time.Time // nil means time.Now
 }
@@ -41,7 +42,7 @@ func newOSApp() (*App, error) {
 	}
 	return &App{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin,
-		Env: env, StdoutIsTTY: isTerminal(os.Stdout), StdinIsTTY: isTerminal(os.Stdin), Location: time.Local,
+		Env: env, StdoutIsTTY: isTerminal(os.Stdout), StdinIsTTY: isTerminal(os.Stdin), StderrIsTTY: isTerminal(os.Stderr), Location: time.Local,
 	}, nil
 }
 
@@ -52,6 +53,7 @@ type globals struct {
 	shell     string
 	noColor   bool
 	noBanner  bool
+	initShell bool
 	verbose   bool
 	version   bool
 }
@@ -70,6 +72,7 @@ func (g *globals) register(fs *flag.FlagSet) {
 	fs.StringVar(&g.shell, "shell", g.shell, "format of --file: zsh, bash, fish or powershell")
 	fs.BoolVar(&g.noColor, "no-color", g.noColor, "disable colors")
 	fs.BoolVar(&g.noBanner, "no-banner", g.noBanner, "do not print the logo")
+	fs.BoolVar(&g.initShell, "init-shell", g.initShell, "same as 'motd' but prints to stderr (compatible with the original shellclear)")
 	fs.BoolVar(&g.verbose, "verbose", g.verbose, "print progress to stderr")
 	fs.BoolVar(&g.verbose, "v", g.verbose, "shorthand for --verbose")
 	fs.BoolVar(&g.version, "version", g.version, "print version and exit")
@@ -92,6 +95,8 @@ Commands:
   pop       bring stashed history back, keeping commands run since
   restore   list backups, restore one, or --prune old ones
   rules     list active detection rules
+  config    init, validate or print the config directory
+  motd      one-line reminder for shell start-up; silent when history is clean
 
 Global flags:
   --config-dir DIR   config and state directory (default: $SHELLCLEAR_HOME or ~/.shellclear)
@@ -99,6 +104,7 @@ Global flags:
   --shell NAME       format of --file: zsh, bash, fish or powershell
   --no-color         disable colors (also honors NO_COLOR)
   --no-banner        do not print the logo
+  --init-shell       same as 'motd', printed to stderr (original shellclear style)
   -v, --verbose      print progress to stderr
   --version          print version and exit
 
@@ -106,6 +112,11 @@ Exit codes:
   0  success, no secrets found
   1  find reported secrets
   2  error
+
+Shell start-up reminder (prints nothing when history is clean):
+  zsh:  echo 'shellclear motd' >> ~/.zshrc
+  bash: echo 'shellclear motd' >> ~/.bashrc
+  fish: echo 'shellclear motd' >> ~/.config/fish/config.fish
 
 Run "shellclear <command> --help" for command flags.
 `
@@ -128,6 +139,9 @@ func (a *App) Run(args []string) int {
 		return exitOK
 	}
 	rest := fs.Args()
+	if g.initShell {
+		return a.cmdMotd(&g, rest, a.Stderr, a.StderrIsTTY)
+	}
 	if len(rest) == 0 {
 		fmt.Fprint(a.Stderr, usageText)
 		return exitError
@@ -151,8 +165,10 @@ func (a *App) Run(args []string) int {
 		code, err = a.cmdPop(&g, rest[1:])
 	case "restore":
 		code, err = a.cmdRestore(&g, rest[1:])
-	case "config", "motd":
-		err = fmt.Errorf("command %q is not available in this build yet", rest[0])
+	case "config":
+		code, err = a.cmdConfig(&g, rest[1:])
+	case "motd":
+		return a.cmdMotd(&g, rest[1:], a.Stdout, a.StdoutIsTTY)
 	default:
 		err = usageError{fmt.Sprintf("unknown command %q", rest[0])}
 	}
@@ -266,6 +282,7 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 	if err != nil {
 		return exitError, err
 	}
+	a.legacyHint(g)
 	files, err := a.detect(g)
 	if err != nil {
 		return exitError, err

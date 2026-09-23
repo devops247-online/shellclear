@@ -89,8 +89,8 @@ colour: red
 		t.Errorf("warnings = %q", cfg.Warnings)
 	}
 
-	errs := Validate(dir)
-	if len(errs) != 1 {
+	_, errs := Validate(dir)
+	if len(errs) != 2 {
 		t.Fatalf("Validate = %v", errs)
 	}
 }
@@ -110,7 +110,7 @@ func TestLoadErrors(t *testing.T) {
 		if _, err := Load(dir); err == nil {
 			t.Errorf("%s: no error", name)
 		}
-		if errs := Validate(dir); len(errs) != 1 {
+		if _, errs := Validate(dir); len(errs) != 1 {
 			t.Errorf("%s: Validate = %v", name, errs)
 		}
 	}

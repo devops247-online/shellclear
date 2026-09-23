@@ -169,6 +169,9 @@ func (d *detector) add(p string, s Shell) {
 			resolved = r
 		}
 	}
+	if abs, err := filepath.Abs(resolved); err == nil {
+		resolved = abs
+	}
 	if d.seen[resolved] {
 		return
 	}

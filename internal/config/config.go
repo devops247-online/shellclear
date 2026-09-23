@@ -3,6 +3,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,6 +33,7 @@ type Config struct {
 	Dir         string
 	Ignore      []string         // rule ids to disable
 	Allow       []*regexp.Regexp // commands matching any of these are never reported
+	AllowRaw    []string         // the allow patterns as written
 	BackupsKeep int              // 0 = keep all
 	CustomRules [][]rules.Rule   // one list per file in rules.d, in lexical order
 	Warnings    []string         // problems that do not stop the program
@@ -94,26 +96,33 @@ func Load(dir string) (*Config, error) {
 	return cfg, nil
 }
 
-// Validate loads the configuration strictly and returns every problem.
-func Validate(dir string) []error {
+// Validate loads the configuration strictly and returns every problem,
+// including ignored ids that match no rule.
+func Validate(dir string) (*Config, []error) {
 	cfg, err := Load(dir)
 	if err != nil {
-		return []error{err}
+		return nil, []error{err}
+	}
+	if _, err := cfg.RuleSet(); err != nil {
+		return cfg, []error{err}
 	}
 	var errs []error
 	for _, w := range cfg.Warnings {
 		errs = append(errs, errors.New(w))
 	}
-	return errs
+	return cfg, errs
 }
 
 func loadRules(path string) ([]rules.Rule, error) {
-	f, err := os.Open(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return rules.Load(f, path)
+	return loadRulesBytes(b, path)
+}
+
+func loadRulesBytes(b []byte, source string) ([]rules.Rule, error) {
+	return rules.Load(bytes.NewReader(b), source)
 }
 
 // parse fills cfg from config.yaml and returns unknown top-level keys.
@@ -157,6 +166,7 @@ func parse(path string, data []byte, cfg *Config) ([]string, error) {
 			return nil, fmt.Errorf("%s: allow %q: %w", path, a, err)
 		}
 		cfg.Allow = append(cfg.Allow, re)
+		cfg.AllowRaw = append(cfg.AllowRaw, a)
 	}
 	cfg.BackupsKeep = y.Backups.Keep
 	return unknown, nil
