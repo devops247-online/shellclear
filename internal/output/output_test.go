@@ -217,3 +217,35 @@ func TestWriteErrors(t *testing.T) {
 		t.Error("rules: write error not reported")
 	}
 }
+
+func TestBanner(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Banner(&buf, "v1.2.3", false); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "\x1b[") || !strings.Contains(out, `|___/_| |_|\___|_|_|\___|_|\___|\__,_|_| v1.2.3`) {
+		t.Fatalf("plain banner:\n%s", out)
+	}
+	buf.Reset()
+	_ = Banner(&buf, "v1.2.3", true)
+	if !strings.Contains(buf.String(), "\x1b[1;38;5;51m") || !strings.Contains(buf.String(), "\x1b[1;38;5;99m") {
+		t.Fatalf("color banner lacks the gradient: %q", buf.String())
+	}
+	if err := Banner(failWriter{}, "v", true); err == nil {
+		t.Fatal("write error not reported")
+	}
+}
+
+func TestFancySummary(t *testing.T) {
+	var buf bytes.Buffer
+	_ = Write(&buf, Text, results(t)[1:], Options{Fancy: true})
+	if !strings.HasPrefix(buf.String(), "🎉 Your shell history is clean!") {
+		t.Fatalf("clean summary = %q", buf.String())
+	}
+	buf.Reset()
+	_ = Write(&buf, Text, results(t), Options{Fancy: true})
+	if !strings.Contains(buf.String(), "🔑 2 sensitive commands") {
+		t.Fatalf("summary = %q", buf.String())
+	}
+}

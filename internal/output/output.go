@@ -38,6 +38,7 @@ func ParseFormat(s string) (Format, error) {
 // Options control rendering.
 type Options struct {
 	Color    bool
+	Fancy    bool           // interactive terminal: emoji in the summary line
 	Location *time.Location // for timestamps; nil means time.Local
 	Home     string         // replaced with ~ in paths for text output
 }
@@ -206,10 +207,19 @@ func writeText(w io.Writer, results []scan.Result, opt Options) error {
 	}
 	s := Summarize(results)
 	if s.Commands == 0 {
-		ew.printf("No secrets found in %d history %s.\n", s.FilesScanned, plural(s.FilesScanned, "file", "files"))
+		if opt.Fancy {
+			ew.printf("🎉 %sYour shell history is clean!%s No secrets found in %d history %s.\n",
+				c.green, c.reset, s.FilesScanned, plural(s.FilesScanned, "file", "files"))
+		} else {
+			ew.printf("No secrets found in %d history %s.\n", s.FilesScanned, plural(s.FilesScanned, "file", "files"))
+		}
 	} else {
-		ew.printf("%s%d sensitive %s%s in %d %s (high: %d, medium: %d, low: %d).\n",
-			c.bold, s.Commands, plural(s.Commands, "command", "commands"), c.reset,
+		icon := ""
+		if opt.Fancy {
+			icon = "🔑 "
+		}
+		ew.printf("%s%s%d sensitive %s%s in %d %s (high: %d, medium: %d, low: %d).\n",
+			icon, c.bold, s.Commands, plural(s.Commands, "command", "commands"), c.reset,
 			s.FilesWithFindings, plural(s.FilesWithFindings, "file", "files"),
 			s.BySeverity["high"], s.BySeverity["medium"], s.BySeverity["low"])
 	}
@@ -312,7 +322,7 @@ func plural(n int, one, many string) string {
 }
 
 type colors struct {
-	bold, dim, reset, red, yellow, cyan string
+	bold, dim, reset, red, yellow, cyan, green string
 }
 
 func (c colors) sev(s rules.Severity) string {
@@ -329,7 +339,7 @@ func palette(on bool) colors {
 	if !on {
 		return colors{}
 	}
-	return colors{bold: "\x1b[1m", dim: "\x1b[2m", reset: "\x1b[0m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m"}
+	return colors{bold: "\x1b[1m", dim: "\x1b[2m", reset: "\x1b[0m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m", green: "\x1b[1;32m"}
 }
 
 type errWriter struct {

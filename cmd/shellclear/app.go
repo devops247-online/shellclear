@@ -51,6 +51,7 @@ type globals struct {
 	files     multiFlag
 	shell     string
 	noColor   bool
+	noBanner  bool
 	verbose   bool
 	version   bool
 }
@@ -68,6 +69,7 @@ func (g *globals) register(fs *flag.FlagSet) {
 	fs.Var(&g.files, "file", "history file to use instead of auto-detection (repeatable)")
 	fs.StringVar(&g.shell, "shell", g.shell, "format of --file: zsh, bash, fish or powershell")
 	fs.BoolVar(&g.noColor, "no-color", g.noColor, "disable colors")
+	fs.BoolVar(&g.noBanner, "no-banner", g.noBanner, "do not print the logo")
 	fs.BoolVar(&g.verbose, "verbose", g.verbose, "print progress to stderr")
 	fs.BoolVar(&g.verbose, "v", g.verbose, "shorthand for --verbose")
 	fs.BoolVar(&g.version, "version", g.version, "print version and exit")
@@ -96,6 +98,7 @@ Global flags:
   --file PATH        history file to use instead of auto-detection (repeatable)
   --shell NAME       format of --file: zsh, bash, fish or powershell
   --no-color         disable colors (also honors NO_COLOR)
+  --no-banner        do not print the logo
   -v, --verbose      print progress to stderr
   --version          print version and exit
 
@@ -284,7 +287,12 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 		results = append(results, r)
 	}
 
-	opt := output.Options{Color: a.colorOn(g), Location: a.Location, Home: a.Env.Home}
+	opt := output.Options{Color: a.colorOn(g), Fancy: a.StdoutIsTTY, Location: a.Location, Home: a.Env.Home}
+	if f == output.Text && a.StdoutIsTTY && !g.noBanner {
+		if err := output.Banner(a.Stdout, version, opt.Color); err != nil {
+			return exitError, err
+		}
+	}
 	if err := output.Write(a.Stdout, f, results, opt); err != nil {
 		return exitError, err
 	}

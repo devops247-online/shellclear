@@ -243,3 +243,24 @@ func TestNewOSApp(t *testing.T) {
 		t.Fatalf("newOSApp: %v", err)
 	}
 }
+
+func TestBannerOnlyOnTerminalText(t *testing.T) {
+	ta := newTestApp(t)
+	ta.write(t, ".zsh_history", ": 1:0;ls\n")
+	logo := `|___/_| |_|`
+	ta.run("find")
+	if strings.Contains(ta.stdout.String(), logo) {
+		t.Fatal("banner printed to a pipe")
+	}
+	ta.StdoutIsTTY = true
+	ta.run("find")
+	if !strings.Contains(ta.stdout.String(), logo) || !strings.Contains(ta.stdout.String(), "🎉") {
+		t.Fatalf("no banner on a terminal:\n%s", ta.stdout)
+	}
+	for _, args := range [][]string{{"find", "--no-banner"}, {"--no-banner", "find"}, {"find", "--format", "json"}, {"find", "--format", "table"}} {
+		ta.run(args...)
+		if strings.Contains(ta.stdout.String(), logo) {
+			t.Fatalf("%v: banner printed", args)
+		}
+	}
+}
