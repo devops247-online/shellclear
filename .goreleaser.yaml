@@ -40,25 +40,6 @@ archives:
 checksum:
   name_template: checksums.txt
 
-nfpms:
-  - id: packages
-    package_name: shellclear
-    file_name_template: "{{ .ConventionalFileName }}"
-    vendor: devops247-online
-    homepage: https://github.com/devops247-online/shellclear
-    maintainer: devops247-online <noreply@github.com>
-    description: Find secrets in shell history and remove them without breaking the history file.
-    license: Apache-2.0
-    formats: [deb, rpm, apk]
-    bindir: /usr/bin
-    contents:
-      - src: LICENSE
-        dst: /usr/share/doc/shellclear/LICENSE
-      - src: NOTICE
-        dst: /usr/share/doc/shellclear/NOTICE
-      - src: README.md
-        dst: /usr/share/doc/shellclear/README.md
-
 changelog:
   use: github
   sort: asc

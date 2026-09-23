@@ -68,14 +68,14 @@ brew install devops247-online/tap/shellclear
 go install github.com/devops247-online/shellclear/cmd/shellclear@latest
 ```
 
-**Prebuilt binaries and packages.** Every
+**Prebuilt binaries.** Every
 [release](https://github.com/devops247-online/shellclear/releases) includes archives for
-macOS, Linux and Windows, plus `.deb`, `.rpm` and `.apk` packages and `checksums.txt`.
-Each artifact has a signed build provenance attestation:
+macOS, Linux and Windows and a `checksums.txt`. Each archive has a signed build
+provenance attestation:
 
 ```sh
 gh attestation verify shellclear_0.1.0_linux_amd64.tar.gz -R devops247-online/shellclear
-sudo apt install ./shellclear_0.1.0_amd64.deb
+tar xzf shellclear_0.1.0_linux_amd64.tar.gz shellclear
 ```
 
 macOS marks binaries downloaded with a browser as quarantined. The release binaries are
