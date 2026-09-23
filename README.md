@@ -351,8 +351,23 @@ make test       # go test -race -cover ./...
 make lint       # golangci-lint
 make fuzz       # fuzz every history codec (FUZZTIME=30s each)
 make bench      # BenchmarkScan100k
+make security   # supply-chain and vulnerability checks, in parallel
 make snapshot   # build all release artifacts into dist/ without publishing
 ```
+
+`make security` runs `scripts/security-scan.sh`, which CI also runs, one job per check.
+The release workflow runs the blocking checks before it builds anything:
+
+| Check | Role |
+|---|---|
+| `go mod verify` | Gate. Dependency checksums match `go.sum`. |
+| [govulncheck](https://github.com/golang/vuln) | Gate. Known vulnerabilities in code the binary actually calls. |
+| [Grype](https://github.com/anchore/grype) | Gate. Fixable critical vulnerabilities in dependencies. |
+| [Trivy](https://github.com/aquasecurity/trivy) | Gate. Fixable high and critical vulnerabilities, misconfigurations, secrets and licenses. |
+| [osv-scanner](https://github.com/google/osv-scanner) | Informational. Every known vulnerability in `go.mod`. |
+| [capslock](https://github.com/google/capslock) | Informational. What the code can do. `shellclear` needs file and system-state access, but no network and no process execution. |
+
+Scanner versions are pinned in the script.
 
 Releases are cut by pushing a `vX.Y.Z` tag. GoReleaser builds the artifacts, the release
 workflow attests them and updates the Homebrew formula in

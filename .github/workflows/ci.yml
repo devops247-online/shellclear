@@ -72,13 +72,22 @@ jobs:
           name: fuzz-${{ matrix.target }}
           path: internal/history/testdata/fuzz
 
-  vulncheck:
+  security:
+    # One job per scanner so they run in parallel; see scripts/security-scan.sh.
+    # Gates: modverify, govulncheck, grype, trivy. Informational: osv, capslock.
+    name: security (${{ matrix.check }})
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [modverify, govulncheck, grype, trivy, osv, capslock]
     runs-on: ubuntu-latest
     steps:
-      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-input: stable
-          go-package: ./...
+          go-version: stable
+      - name: ${{ matrix.check }}
+        run: scripts/security-scan.sh ${{ matrix.check }}
 
   release-dry-run:
     runs-on: ubuntu-latest
