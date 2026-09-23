@@ -1,0 +1,13 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "printf into netrc"
+  test: "printf 'machine x.atlassian.net\\n  login me@corp.com\\n  password ATATT3x{{A*177}}=E239C05D\\n' >> ~/.netrc"
+  expected: "ATATT3x{{A*177}}=E239C05D"
+
+- name: "env export"
+  test: "export JIRA_API_TOKEN=ATATT3x{{b*177}}=0A1B2C3D"
+  expected: "ATATT3x{{b*177}}=0A1B2C3D"
+
+- name: "too short"
+  test: "echo ATATT3xshort"
+  expected: ""
