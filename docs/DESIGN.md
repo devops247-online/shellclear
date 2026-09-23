@@ -416,8 +416,17 @@ stdout is a TTY (checked with `os.File.Stat()` and `ModeCharDevice`, no x/term).
    directory fsync is skipped. Any failure removes `tmp`.
 7. Print the "restart your shells" hint for each shell type that was touched.
 
-The window between step 5 and the rename is a few milliseconds. See Q6 about
-closing it completely for zsh.
+Locking, as implemented:
+
+- The shellclear lock is an fcntl lock on `<state>/lock`.
+- For zsh files, `<HISTFILE>.LOCK` is taken the way zsh's `lockhistfile`
+  does it: a symlink to `/pid-<pid>/host-<host>`. A lock older than
+  10 seconds is treated as stale, as in zsh.
+- Every history file also gets an fcntl lock, for zsh's `HIST_FCNTL_LOCK`.
+  POSIX drops a process's fcntl locks when it closes any descriptor of the
+  file, so the re-read in step 5 goes through the locked descriptor.
+- If a commit to the tail fails after the backup was written, the backup is
+  removed again. On `ErrChanged` nothing remains on disk.
 
 ## 6. CLI behaviour notes
 

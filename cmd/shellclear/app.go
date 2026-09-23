@@ -29,7 +29,9 @@ type App struct {
 	Stdin          io.Reader
 	Env            history.Env
 	StdoutIsTTY    bool
+	StdinIsTTY     bool
 	Location       *time.Location
+	Now            func() time.Time // nil means time.Now
 }
 
 func newOSApp() (*App, error) {
@@ -39,13 +41,8 @@ func newOSApp() (*App, error) {
 	}
 	return &App{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin,
-		Env: env, StdoutIsTTY: isTerminal(os.Stdout), Location: time.Local,
+		Env: env, StdoutIsTTY: isTerminal(os.Stdout), StdinIsTTY: isTerminal(os.Stdin), Location: time.Local,
 	}, nil
-}
-
-func isTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // globals are flags accepted before or after the command name.
@@ -88,6 +85,10 @@ Usage:
 
 Commands:
   find      list commands that contain secrets
+  clear     mask secrets (or --remove whole commands); backs up first
+  stash     move history aside before screen sharing
+  pop       bring stashed history back, keeping commands run since
+  restore   list backups, restore one, or --prune old ones
   rules     list active detection rules
 
 Global flags:
@@ -139,10 +140,22 @@ func (a *App) Run(args []string) int {
 	case "help":
 		fmt.Fprint(a.Stdout, usageText)
 		return exitOK
-	case "clear", "stash", "pop", "restore", "config", "motd":
+	case "clear":
+		code, err = a.cmdClear(&g, rest[1:])
+	case "stash":
+		code, err = a.cmdStash(&g, rest[1:])
+	case "pop":
+		code, err = a.cmdPop(&g, rest[1:])
+	case "restore":
+		code, err = a.cmdRestore(&g, rest[1:])
+	case "config", "motd":
 		err = fmt.Errorf("command %q is not available in this build yet", rest[0])
 	default:
 		err = usageError{fmt.Sprintf("unknown command %q", rest[0])}
+	}
+	if errors.Is(err, errSecretsRemain) {
+		fmt.Fprintf(a.Stderr, "shellclear: %v; edit the lines listed above by hand\n", err)
+		return exitFindings
 	}
 	if err != nil {
 		return a.fail(err)

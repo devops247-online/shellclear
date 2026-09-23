@@ -216,7 +216,7 @@ func TestUsageAndErrors(t *testing.T) {
 		{[]string{"--version"}, exitOK, "stdout", "shellclear dev"},
 		{[]string{"--bogus"}, exitError, "stderr", "--help"},
 		{[]string{"bogus"}, exitError, "stderr", `unknown command "bogus"`},
-		{[]string{"clear"}, exitError, "stderr", "not available"},
+		{[]string{"motd"}, exitError, "stderr", "not available"},
 		{[]string{"find", "--help"}, exitOK, "stdout", "-severity"},
 		{[]string{"find", "--format", "xml"}, exitError, "stderr", "unknown format"},
 		{[]string{"find", "--severity", "urgent"}, exitError, "stderr", "unknown severity"},
