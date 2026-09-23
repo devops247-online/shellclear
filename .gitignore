@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/tmp/
+/coverage.out
+*.test
+*.prof
