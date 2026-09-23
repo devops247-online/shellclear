@@ -2,5 +2,5 @@
 # Changed: the value is generated at test time ({{c*n}} macro) so that no
 # token-shaped string is stored in the repository.
 - name: detect MailChimp API Key
-  test: {{a*32}}-us01
-  expected: {{a*32}}-us01
+  test: "{{a*32}}-us01"
+  expected: "{{a*32}}-us01"
