@@ -433,10 +433,13 @@
   severity: high
   keywords: [atatt3]
 
-# netrc entries, including ones written with printf and literal "\n".
+# netrc entries, including ones written with printf and literal "\n". Only
+# the netrc grammar is accepted between "machine"/"default" and "password"
+# (login, account and port tokens), so prose such as "the default password"
+# or a long transcript that mentions both words is not a match.
 - id: netrc_password
   name: netrc Password
-  test: '(?is)\b(?:machine|default)\b.*?\bpassword\s+[''"]?([^\s''"\x60\\]+)'
+  test: '(?i)\b(?:machine(?:\s|\\n)+[^\s\\''"]+(?:(?:\s|\\n)+(?:login|account|port)(?:\s|\\n)+[^\s\\''"]+){0,3}|default(?:(?:\s|\\n)+(?:login|account|port)(?:\s|\\n)+[^\s\\''"]+){1,3})(?:\s|\\n)+password(?:\s|\\n)+[''"]?([^\s''"\x60\\]+)'
   secret_group: 1
   severity: high
   keywords: [machine, default]
