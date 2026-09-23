@@ -383,7 +383,7 @@ func TestReplaceNoMatchReturnsInput(t *testing.T) {
 }
 
 func TestParseShell(t *testing.T) {
-	names := map[string]Shell{"zsh": Zsh, "BASH": Bash, "\tfish\n": Fish, "pwsh": PowerShell, "powershell": PowerShell}
+	names := map[string]Shell{"zsh": Zsh, "BASH": Bash, "\tfish\n": Fish, "pwsh": PowerShell, "powershell": PowerShell, "jsonl": JSON}
 	for in, want := range names {
 		if got, err := ParseShell(in); err != nil || got != want {
 			t.Errorf("ParseShell(%q) = %q, %v", in, got, err)

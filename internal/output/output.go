@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/devops247-online/shellclear/internal/history"
 	"github.com/devops247-online/shellclear/internal/rules"
 	"github.com/devops247-online/shellclear/internal/scan"
 )
@@ -63,18 +64,88 @@ func MaskSecret(s string) string {
 // MaskCommand replaces every match in cmd with its masked form and makes the
 // result safe to print on a terminal.
 func MaskCommand(cmd string, ms []rules.Match) string {
+	masked, _ := maskSpans(cmd, ms)
+	return Sanitize(masked)
+}
+
+// MaskExcerpt is MaskCommand for display. A long command, such as a record of
+// an AI chat transcript, is cut down to the text around each secret.
+func MaskExcerpt(cmd string, ms []rules.Match) string {
+	masked, spans := maskSpans(cmd, ms)
+	return Sanitize(excerpt(masked, spans))
+}
+
+// ExcerptAround makes s safe to print and, when it is long, cuts it down to
+// the text around each occurrence of marker.
+func ExcerptAround(s, marker string) string {
+	var spans [][2]int
+	for off := 0; marker != ""; {
+		i := strings.Index(s[off:], marker)
+		if i < 0 {
+			break
+		}
+		spans = append(spans, [2]int{off + i, off + i + len(marker)})
+		off += i + len(marker)
+	}
+	return Sanitize(excerpt(s, spans))
+}
+
+// maskSpans masks every match and returns where the masks are in the result.
+func maskSpans(cmd string, ms []rules.Match) (string, [][2]int) {
 	var b strings.Builder
+	var spans [][2]int
 	prev := 0
 	for _, m := range ms {
 		if m.Start < prev || m.End > len(cmd) {
 			continue
 		}
 		b.WriteString(cmd[prev:m.Start])
+		start := b.Len()
 		b.WriteString(MaskSecret(m.Secret))
+		spans = append(spans, [2]int{start, b.Len()})
 		prev = m.End
 	}
 	b.WriteString(cmd[prev:])
-	return Sanitize(b.String())
+	return b.String(), spans
+}
+
+// Excerpt limits, in bytes.
+const (
+	excerptMax     = 240 // shorter text is shown whole
+	excerptContext = 60  // shown on each side of a span
+)
+
+// excerpt keeps the text around each span of s and replaces the rest with
+// "…". Spans must be ordered and must not overlap.
+func excerpt(s string, spans [][2]int) string {
+	if len(s) <= excerptMax || len(spans) == 0 {
+		return s
+	}
+	var b strings.Builder
+	end := 0 // end of the text written so far
+	for _, sp := range spans {
+		from := runeStart(s, max(sp[0]-excerptContext, 0))
+		to := runeStart(s, min(sp[1]+excerptContext, len(s)))
+		if from > end {
+			b.WriteString("…")
+		} else {
+			from = end
+		}
+		b.WriteString(s[from:to])
+		end = to
+	}
+	if end < len(s) {
+		b.WriteString("…")
+	}
+	return b.String()
+}
+
+// runeStart moves i back to the start of a UTF-8 sequence.
+func runeStart(s string, i int) int {
+	for i > 0 && i < len(s) && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
 }
 
 // Sanitize makes text printable: invalid UTF-8 becomes U+FFFD, newlines are
@@ -152,6 +223,7 @@ type jsonFinding struct {
 type jsonFile struct {
 	Path     string        `json:"path"`
 	Shell    string        `json:"shell"`
+	Tool     string        `json:"tool,omitempty"`
 	Findings []jsonFinding `json:"findings"`
 }
 
@@ -164,9 +236,9 @@ type jsonDoc struct {
 func writeJSON(w io.Writer, results []scan.Result, opt Options) error {
 	doc := jsonDoc{Version: 1, Files: []jsonFile{}, Summary: Summarize(results)}
 	for _, r := range results {
-		jf := jsonFile{Path: r.File.Path, Shell: string(r.File.Shell), Findings: []jsonFinding{}}
+		jf := jsonFile{Path: r.File.Path, Shell: string(r.File.Shell), Tool: r.File.Tool, Findings: []jsonFinding{}}
 		for _, f := range r.Findings {
-			masked := MaskCommand(f.Command, f.Matches)
+			masked := MaskExcerpt(f.Command, f.Matches)
 			var ts *string
 			if !f.Time.IsZero() {
 				s := f.Time.In(opt.Location).Format(time.RFC3339)
@@ -195,13 +267,13 @@ func writeText(w io.Writer, results []scan.Result, opt Options) error {
 			continue
 		}
 		ew.printf("%s%s%s (%s) — %d %s\n", c.bold, displayPath(r.File.Path, opt.Home), c.reset,
-			r.File.Shell, len(r.Findings), plural(len(r.Findings), "command", "commands"))
+			Kind(r.File), len(r.Findings), plural(len(r.Findings), "command", "commands"))
 		for _, f := range r.Findings {
 			sev := f.MaxSeverity()
 			ew.printf("  %sL%-6d%s %s  %s%-6s%s  %s\n", c.dim, f.Line, c.reset,
 				formatTime(f.Time, opt.Location), c.sev(sev), strings.ToUpper(sev.String()), c.reset,
 				strings.Join(ruleIDs(f), ","))
-			ew.printf("           %s\n", MaskCommand(f.Command, f.Matches))
+			ew.printf("           %s\n", MaskExcerpt(f.Command, f.Matches))
 		}
 		ew.printf("\n")
 	}
@@ -234,7 +306,7 @@ func writeTable(w io.Writer, results []scan.Result, opt Options) error {
 		for _, f := range r.Findings {
 			ew.printf("%s\t%d\t%s\t%s\t%s\t%s\n", displayPath(r.File.Path, opt.Home), f.Line,
 				formatTime(f.Time, opt.Location), f.MaxSeverity(), strings.Join(ruleIDs(f), ","),
-				strings.ReplaceAll(MaskCommand(f.Command, f.Matches), "\t", " "))
+				strings.ReplaceAll(MaskExcerpt(f.Command, f.Matches), "\t", " "))
 		}
 	}
 	if ew.err != nil {
@@ -285,6 +357,14 @@ func WriteRules(w io.Writer, f Format, rs []*rules.Rule, opt Options) error {
 		return ew.err
 	}
 	return tw.Flush()
+}
+
+// Kind names what wrote a history file: the AI assistant, or else the shell.
+func Kind(f history.File) string {
+	if f.Tool != "" {
+		return f.Tool
+	}
+	return string(f.Shell)
 }
 
 func ruleIDs(f scan.Finding) []string {

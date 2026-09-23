@@ -115,7 +115,7 @@ func (a *App) cmdMotd(g *globals, args []string, w io.Writer, isTTY bool) int {
 			return exitOK
 		}
 	}
-	files, err := history.Detect(a.Env, g.files, shell)
+	files, err := detectFiles(a.Env, g, shell)
 	if err != nil {
 		a.verbosef(g, "motd: %v", err)
 		return exitOK
@@ -139,8 +139,12 @@ func (a *App) cmdMotd(g *globals, args []string, w io.Writer, isTTY bool) int {
 	if isTTY && !g.noColor && a.Env.Getenv("NO_COLOR") == "" {
 		yellow, reset = "\x1b[1;33m", "\x1b[0m"
 	}
-	fmt.Fprintf(w, "%s⚠ shellclear: %d sensitive %s found in history — run 'shellclear find'%s\n",
-		yellow, n, pluralize(n, "command", "commands"), reset)
+	findCmd := "shellclear find"
+	if g.ai {
+		findCmd += " --ai"
+	}
+	fmt.Fprintf(w, "%s⚠ shellclear: %d sensitive %s found in history — run '%s'%s\n",
+		yellow, n, pluralize(n, "command", "commands"), findCmd, reset)
 	return exitOK
 }
 
