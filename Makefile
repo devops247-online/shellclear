@@ -26,8 +26,7 @@ security:
 	scripts/security-scan.sh
 
 hooks:
-	ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
-	@echo "pre-push hook installed: Trivy runs before every push"
+	pre-commit install --hook-type pre-commit
 
 snapshot:
 	goreleaser release --snapshot --clean

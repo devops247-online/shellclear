@@ -369,8 +369,9 @@ The release workflow runs the blocking checks before it builds anything:
 
 Scanner versions are pinned in the script.
 
-Run `make hooks` once after cloning. It installs a `pre-push` hook that runs Trivy and
-blocks the push when Trivy reports a finding. CI runs the full set of checks.
+Run `make hooks` once after cloning. It installs a [pre-commit](https://pre-commit.com)
+hook that runs Trivy and blocks the commit when Trivy reports a finding. CI runs the full
+set of checks.
 
 Releases are cut by pushing a `vX.Y.Z` tag. GoReleaser builds the artifacts, the release
 workflow attests them and updates the Homebrew formula in

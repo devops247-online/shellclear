@@ -1,0 +1,14 @@
+---
+# Install with `make hooks` (runs `pre-commit install`).
+# CI and the release workflow run the full set of checks
+# (scripts/security-scan.sh); before a commit only Trivy runs.
+repos:
+  - repo: local
+    hooks:
+      - id: trivy
+        name: trivy (vulnerabilities, misconfigurations, secrets, licenses)
+        entry: scripts/security-scan.sh trivy
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
