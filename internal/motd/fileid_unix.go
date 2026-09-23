@@ -3,16 +3,18 @@
 package motd
 
 import (
+	"fmt"
 	"io/fs"
-	"strconv"
 	"syscall"
 )
 
 // fileID identifies the inode, so an atomic replacement is always noticed.
+// Stat_t field types differ between platforms, so they are formatted rather
+// than converted.
 func fileID(fi fs.FileInfo) string {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return ""
 	}
-	return strconv.FormatUint(uint64(st.Dev), 10) + ":" + strconv.FormatUint(st.Ino, 10)
+	return fmt.Sprintf("%d:%d", st.Dev, st.Ino)
 }
