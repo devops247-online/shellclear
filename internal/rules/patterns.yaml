@@ -1,0 +1,494 @@
+# Built-in detection rules.
+#
+# Format (compatible with rusty-ferris-club/shellclear custom pattern files):
+#   id            unique snake_case identifier
+#   name          human-readable name
+#   test          RE2 regular expression (Go regexp syntax)
+#   secret_group  0 = whole match, N = capture group N holds the secret
+#   severity      high | medium | low (default: medium)
+#   keywords      optional prefilter; the regex runs only when the lower-cased
+#                 command contains at least one keyword
+#
+# Rules from the "ported" section are derived from rusty-ferris-club/shellclear
+# (Apache-2.0). Changes against the original are noted next to each rule.
+
+# ---------------------------------------------------------------------------
+# Ported rules
+# ---------------------------------------------------------------------------
+
+# Changed: {0,100} -> {1,200}; the value may be quoted. Spaces around '=' are
+# allowed only before a quoted value (PowerShell: $env:X = "v"); in a shell,
+# "X= cmd" assigns an empty value.
+- id: aws_end_access_key
+  name: AWS Env Access Key
+  test: 'AWS_ACCESS_KEY_ID(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: medium
+  keywords: [aws_access_key_id]
+
+- id: aws_env_secret_key
+  name: AWS Env Secret Key
+  test: 'AWS_SECRET_ACCESS_KEY(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [aws_secret_access_key]
+
+- id: aws_cred
+  name: AWS Cred
+  test: '(?i)(aws_access_key_id|aws_secret_access_key)(?:=[''"]?|\s*=\s*[''"])([0-9a-zA-Z/+]{20,40})'
+  secret_group: 2
+  severity: high
+  keywords: [aws_access_key_id, aws_secret_access_key]
+
+# Changed: stops at whitespace or a quote instead of the last quote on the line.
+- id: curl_basic_auth
+  name: cURL Basic Authentication
+  test: '(?i)authorization:\s*basic\s+([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [authorization]
+
+# Changed: requires "user:password"; "-u user" alone prompts for the password.
+- id: curl_user_login
+  name: cURL User Login
+  test: '\bcurl\b[^|;&]*?\s(?:-u|--user)(?:\s+|=)[''"]?([^\s''"\x60:]*:[^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [curl]
+
+- id: github_env_token
+  name: GitHub Env Token
+  test: 'GITHUB_TOKEN(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [github_token]
+
+- id: github_personal_token
+  name: GitHub Personal Token
+  test: 'ghp_[0-9a-zA-Z]{36}'
+  secret_group: 0
+  severity: high
+  keywords: [ghp_]
+
+- id: github_oauth_token
+  name: GitHub OAuth Token
+  test: 'gho_[0-9a-zA-Z]{36}'
+  secret_group: 0
+  severity: high
+  keywords: [gho_]
+
+- id: github_app_token
+  name: GitHub App Token
+  test: '(?:ghu|ghs)_[0-9a-zA-Z]{36}'
+  secret_group: 0
+  severity: high
+  keywords: [ghu_, ghs_]
+
+- id: github_refresh_token
+  name: GitHub Refresh Token
+  test: 'ghr_[0-9a-zA-Z]{36}'
+  secret_group: 0
+  severity: high
+  keywords: [ghr_]
+
+- id: gitlab_token
+  name: Gitlab token
+  test: 'GITLAB_TOKEN(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [gitlab_token]
+
+# Changed: current tokens can be longer than 20 characters.
+- id: gitlab_personal_token
+  name: Gitlab Personal Token
+  test: 'glpat-[0-9a-zA-Z_-]{20,}'
+  secret_group: 0
+  severity: high
+  keywords: [glpat-]
+
+# Changed: secret_group 0 -> 1 (the original masked the variable name too).
+- id: heroku_api_key
+  name: Heroku API Key
+  test: '(?i)heroku[0-9a-z\-_\t .]{0,20}[\s''"]{0,3}(?:=|>|:=|\|\|:|<=|=>|:)[''"\s=\x60]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[''"\s\x60]|$)'
+  secret_group: 1
+  severity: high
+  keywords: [heroku]
+
+- id: heroku_env_api_key
+  name: Heroku Env api key
+  test: 'HEROKU_API_KEY(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [heroku_api_key]
+
+- id: hashicorp_env_vault_token
+  name: hashicorp Env Vault Token
+  test: 'VAULT_TOKEN(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [vault_token]
+
+- id: hashicorp_env_console_http_token
+  name: hashicorp Env console HTTP token
+  test: 'CONSUL_HTTP_TOKEN(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [consul_http_token]
+
+- id: vercel_env_token
+  name: Vercel Env Token
+  test: 'VERCEL_TOKEN(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [vercel_token]
+
+- id: cloudflare_env_api_key
+  name: Cloudflare ENV Api Key
+  test: 'CLOUDFLARE_API_(?:KEY|TOKEN)(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [cloudflare_api_]
+
+- id: newrelic_env_api_key
+  name: Newrelic Env api key
+  test: 'NEW_?RELIC_API_KEY(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [newrelic_api_key, new_relic_api_key]
+
+- id: mail_gun_api_key
+  name: MailGun API Key
+  test: 'key-[0-9a-zA-Z]{32}'
+  secret_group: 0
+  severity: medium
+  keywords: [key-]
+
+- id: mail_chimp_api_key
+  name: MailChimp API Key
+  test: '(?i)[0-9a-f]{32}-us[0-9]{1,2}'
+  secret_group: 0
+  severity: high
+  keywords: [-us]
+
+# Changed: id lower-cased; '.' escaped.
+- id: sendgrid_api_token
+  name: SendGrid API Token
+  test: 'SG\.[0-9A-Za-z_-]{15,30}\.[0-9A-Za-z_-]{15,30}'
+  secret_group: 0
+  severity: high
+  keywords: [sg.]
+
+# Changed: id lower-cased.
+- id: sendgrid_api_key
+  name: SendGrid API Key
+  test: 'SG\.[0-9A-Za-z_-]{22}\.[0-9A-Za-z_-]{43}'
+  secret_group: 0
+  severity: high
+  keywords: [sg.]
+
+# Changed: accepts the current three-part bot/user token layout.
+- id: slack_token
+  name: Slack Token
+  test: 'xox[pboars]-[0-9]{10,13}-[0-9]{10,13}(?:-[0-9]{10,13})?-[a-zA-Z0-9]{24,34}'
+  secret_group: 0
+  severity: high
+  keywords: [xox]
+
+- id: slack_webhook
+  name: Slack Webhook
+  test: 'https://hooks\.slack\.com/services/([A-Za-z0-9+/]{44,46})'
+  secret_group: 1
+  severity: high
+  keywords: [hooks.slack.com]
+
+- id: twilio_api_key
+  name: Twilio API Key
+  test: '\bSK[0-9a-fA-F]{32}'
+  secret_group: 0
+  severity: medium
+  keywords: [sk]
+
+# Changed: the secret is the password only (the original also masked the user
+# name and flagged "user@host" without a password); schemes such as
+# "mongodb+srv" are accepted.
+- id: url_basic_auth
+  name: URL Basic Auth
+  test: '\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@''"]+:([^\s@/''"]+)@[A-Za-z0-9.\[\]-]+'
+  secret_group: 1
+  severity: high
+  keywords: ['://']
+
+# Changed: case-sensitive prefix; secret_group 0 -> 1 (the original also
+# masked the character after the key).
+- id: gcp_api_key
+  name: GCP API Key
+  test: '\b(AIza[0-9A-Za-z_-]{35})(?:[''"\s\x60]|$)'
+  secret_group: 1
+  severity: high
+  keywords: [aiza]
+
+- id: teams_webhook
+  name: Teams Webhook
+  test: 'https://outlook\.office\.com/webhook/([0-9a-f-]{36})/@'
+  secret_group: 1
+  severity: medium
+  keywords: [outlook.office.com]
+
+- id: nuget_api_key
+  name: NuGet API Key
+  test: 'oy2[a-z0-9]{43}'
+  secret_group: 0
+  severity: high
+  keywords: [oy2]
+
+- id: twitter_secret_key
+  name: Twitter Secret Key
+  test: '(?i)twitter.{0,20}[''"]([0-9a-z]{35,44})[''"]'
+  secret_group: 1
+  severity: high
+  keywords: [twitter]
+
+- id: twitter_clientid
+  name: Twitter Client ID
+  test: '(?i)twitter.{0,20}[''"]([0-9a-z]{18,25})[''"]'
+  secret_group: 1
+  severity: medium
+  keywords: [twitter]
+
+# Changed: reports the password only (the original could report the user).
+- id: wget_user_login
+  name: Wget Username Password Authentication
+  test: '\bwget\b[^|;&]*?\s--(?:ftp-|http-)?password(?:\s+|=)[''"]?([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [wget]
+
+# Changed: id lower-cased.
+- id: linkedin_secret_key
+  name: LinkedIn Secret Key
+  test: '(?i)linkedin.{0,20}(?-i)[''"]([0-9a-zA-Z]{12,16})[''"]'
+  secret_group: 1
+  severity: high
+  keywords: [linkedin]
+
+- id: facebook_access_token
+  name: Facebook Access Token
+  test: 'EAACEdEose0cBA[0-9A-Za-z]+'
+  secret_group: 0
+  severity: high
+  keywords: [eaacedeose0cba]
+
+# Changed: fixed the "\[s" typo in the separator class.
+- id: datadog_key
+  name: Datadog Key
+  test: '(?i)datadog[0-9a-z\-_\t .]{0,20}[\s''"]{0,3}(?:=|>|:=|\|\|:|<=|=>|:)[''"\s=\x60]{0,5}([a-z0-9]{40})(?:[''"\s\x60;]|$)'
+  secret_group: 1
+  severity: high
+  keywords: [datadog]
+
+- id: readme_api_key
+  name: ReadMe io Api Key
+  test: 'README_API_KEY(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [readme_api_key]
+
+- id: cargo_registry_token
+  name: Cargo Registry Token
+  test: 'CARGO_REGISTRY_TOKEN(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 1
+  severity: high
+  keywords: [cargo_registry_token]
+
+# Changed: digits are allowed in the passphrase (the original stopped at the
+# first digit); "-passphrase" and "--passphrase" are both accepted.
+- id: diskutil_password
+  name: Diskutil Password
+  test: '\bdiskutil\b[^|;&]*?\s--?passphrase\s+[''"]?([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [diskutil]
+
+# ---------------------------------------------------------------------------
+# New rules
+# ---------------------------------------------------------------------------
+
+- id: anthropic_api_key
+  name: Anthropic API Key
+  test: '\bsk-ant-[a-z0-9]{2,10}-[A-Za-z0-9_-]{32,}'
+  secret_group: 0
+  severity: high
+  keywords: [sk-ant-]
+
+# Keys carry the base64 marker "T3BlbkFJ"; sk-ant- keys never match.
+- id: openai_api_key
+  name: OpenAI API Key
+  test: '\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{16,}T3BlbkFJ[A-Za-z0-9_-]{16,}'
+  secret_group: 0
+  severity: high
+  keywords: [t3blbkfj]
+
+- id: openai_project_key
+  name: OpenAI Project Key
+  test: '\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}'
+  secret_group: 0
+  severity: high
+  keywords: [sk-proj-, sk-svcacct-, sk-admin-]
+
+- id: github_fine_grained_token
+  name: GitHub Fine-Grained Token
+  test: '\bgithub_pat_[0-9A-Za-z_]{80,90}'
+  secret_group: 0
+  severity: high
+  keywords: [github_pat_]
+
+- id: gitlab_deploy_token
+  name: GitLab Deploy Token
+  test: '\bgldt-[0-9A-Za-z_-]{20,}'
+  secret_group: 0
+  severity: high
+  keywords: [gldt-]
+
+- id: gitlab_runner_token
+  name: GitLab Runner Token
+  test: '\bglrt-[0-9A-Za-z_-]{20,}'
+  secret_group: 0
+  severity: high
+  keywords: [glrt-]
+
+- id: aws_access_key_id
+  name: AWS Access Key ID
+  test: '\b((?:AKIA|ASIA)[0-9A-Z]{16})\b'
+  secret_group: 1
+  severity: medium
+  keywords: [akia, asia]
+
+- id: azure_storage_account_key
+  name: Azure Storage Account Key
+  test: '(?i)AccountKey=([A-Za-z0-9+/]{40,100}={0,2})'
+  secret_group: 1
+  severity: high
+  keywords: [accountkey=]
+
+- id: digitalocean_token
+  name: DigitalOcean Token
+  test: '\bdo[opr]_v1_[a-f0-9]{64}\b'
+  secret_group: 0
+  severity: high
+  keywords: [_v1_]
+
+- id: stripe_live_key
+  name: Stripe Live Key
+  test: '\b(?:sk|rk)_live_[0-9A-Za-z]{24,}'
+  secret_group: 0
+  severity: high
+  keywords: [_live_]
+
+- id: telegram_bot_token
+  name: Telegram Bot Token
+  test: '(?:^|[^0-9])([0-9]{8,10}:AA[0-9A-Za-z_-]{33})(?:[^0-9A-Za-z_-]|$)'
+  secret_group: 1
+  severity: high
+  keywords: [':aa']
+
+- id: npm_token
+  name: npm Access Token
+  test: '\bnpm_[A-Za-z0-9]{36}\b'
+  secret_group: 0
+  severity: high
+  keywords: [npm_]
+
+- id: pypi_token
+  name: PyPI API Token
+  test: '\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}'
+  secret_group: 0
+  severity: high
+  keywords: [pypi-ageichlwas5vcmc]
+
+- id: vault_token
+  name: HashiCorp Vault Token
+  test: '\bhv[sb]\.[A-Za-z0-9_-]{24,}'
+  secret_group: 0
+  severity: high
+  keywords: [hvs., hvb.]
+
+- id: terraform_cloud_token
+  name: Terraform Cloud Token
+  test: '\b[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_-]{60,70}'
+  secret_group: 0
+  severity: high
+  keywords: [.atlasv1.]
+
+- id: private_key
+  name: Private Key (PEM)
+  test: '-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----[\s\S]*?(?:-----END[ A-Z0-9_-]*PRIVATE KEY-----|$)'
+  secret_group: 0
+  severity: high
+  keywords: [private key-----]
+
+- id: jwt
+  name: JSON Web Token
+  test: '\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+  secret_group: 0
+  severity: medium
+  keywords: [eyj]
+
+- id: authorization_header
+  name: Authorization Header
+  test: '(?i)authorization\s*:\s*(?:bearer|basic|token|digest)\s+([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [authorization]
+
+- id: cli_password_flag
+  name: Password or Token Flag
+  test: '(?i)(?:^|\s)--(?:password|passwd|token|api-key|apikey|client-secret|access-token|auth-token)(?:=|\s+)[''"]?([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [--password, --passwd, --token, --api-key, --apikey, --client-secret, --access-token, --auth-token]
+
+# "--secret id=x,src=file" (docker build) is not a secret value, so '=' and ','
+# end the value here.
+- id: cli_secret_flag
+  name: Secret Flag
+  test: '(?i)(?:^|\s)--secret(?:=|\s+)[''"]?([^\s''"\x60=,]{4,})(?:[\s''"\x60]|$)'
+  secret_group: 1
+  severity: high
+  keywords: [--secret]
+
+- id: mysql_password
+  name: MySQL Password Flag
+  test: '\b(?:mysql|mysqldump|mysqladmin|mysqlsh|mariadb)\b[^|;&]*?\s-p([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [mysql, mariadb]
+
+- id: registry_login_password
+  name: Registry Login Password
+  test: '\b(?:docker|podman|nerdctl|buildah|helm\s+registry)\s+login\b[^|;&]*?\s(?:-p|--password)(?:=|\s+)[''"]?([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [login]
+
+# Only options before -p are skipped, so "ssh -p 2222" later is not a match.
+- id: sshpass_password
+  name: sshpass Password
+  test: '\bsshpass\s+(?:-[^p\s]\S*\s+)*-p\s*[''"]?([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [sshpass]
+
+- id: htpasswd_password
+  name: htpasswd Batch Password
+  test: '\bhtpasswd\s+-[A-Za-z]*b[A-Za-z]*\s+(?:\S+\s+){1,2}[''"]?([^\s''"\x60]+)'
+  secret_group: 1
+  severity: high
+  keywords: [htpasswd]
+
+# The keyword must end the variable name, so TOKEN_FILE=/path is not a match.
+- id: generic_secret_assignment
+  name: Generic Secret Assignment
+  test: '(?i)\b([A-Z0-9_]*(?:SECRET(?:_?KEY)?|TOKEN|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)(?:_?[0-9]+)?|MYSQL_PWD|PGPASSWORD)(?:=[''"]?|\s*=\s*[''"])([^\s''"\x60;|&<>]{1,200})'
+  secret_group: 2
+  severity: medium
+  keywords: [secret, token, password, passwd, api_key, apikey, access_key, accesskey, private_key, privatekey, mysql_pwd, pgpassword]

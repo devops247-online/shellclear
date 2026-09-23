@@ -1,0 +1,17 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "full block"
+  test: "echo \"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\" > id"
+  expected: "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----"
+
+- name: "header only"
+  test: "ssh-add - <<< \"-----BEGIN RSA PRIVATE KEY-----\""
+  expected: "-----BEGIN RSA PRIVATE KEY-----"
+
+- name: "public key"
+  test: "echo \"-----BEGIN PUBLIC KEY-----\""
+  expected: ""
+
+- name: "certificate"
+  test: "echo \"-----BEGIN CERTIFICATE-----\""
+  expected: ""

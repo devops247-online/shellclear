@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect GitHub Personal Token
+  test: ghp_shellclear1shellclear2shellclear3shellclear
+  expected: ghp_shellclear1shellclear2shellclear3she

@@ -1,0 +1,9 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+# Changed: the original value contained "EXAMPLE", which shellclear treats as a
+# placeholder. The value was replaced with a non-placeholder of the same length.
+- name: detect aws_access_key_id
+  test: aws_access_key_id=AKISHELLCLEARTESTK3Y
+  expected: AKISHELLCLEARTESTK3Y
+- name: detect aws_secret_access_key
+  test: aws_secret_access_key=AKISHELLCLEARTESTK3Y
+  expected: AKISHELLCLEARTESTK3Y

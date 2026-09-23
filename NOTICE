@@ -1,0 +1,8 @@
+shellclear
+Copyright 2026 devops247-online
+
+This product includes software developed as part of the shellclear project
+by rusty-ferris-club (https://github.com/rusty-ferris-club/shellclear).
+
+Sensitive patterns and their test cases are derived from
+rusty-ferris-club/shellclear, licensed under Apache-2.0.

@@ -1,0 +1,9 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "personal token"
+  test: "doctl auth init -t dop_v1_{{a*64}}"
+  expected: "dop_v1_{{a*64}}"
+
+- name: "not hex"
+  test: "dop_v1_{{g*64}}"
+  expected: ""

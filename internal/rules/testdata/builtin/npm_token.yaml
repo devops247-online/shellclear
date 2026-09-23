@@ -1,0 +1,9 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "npmrc token"
+  test: "npm config set //registry.npmjs.org/:_authToken npm_{{x*36}}"
+  expected: "npm_{{x*36}}"
+
+- name: "word"
+  test: "npm_install"
+  expected: ""

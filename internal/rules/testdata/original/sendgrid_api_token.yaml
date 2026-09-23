@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect SendGrid API Token
+  test: SG.shellcleardH0bSHADAAs2.9Shellclaer_SdadvcCFG33dsSDFDD1
+  expected: SG.shellcleardH0bSHADAAs2.9Shellclaer_SdadvcCFG33dsSDFDD

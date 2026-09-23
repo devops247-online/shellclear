@@ -1,0 +1,5 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect schema://user:pass@domain.tld/
+  test: ./do_something https://username:password@supersecure.service/
+  # Changed: originally expected username:password; only the password is masked.
+  expected: password

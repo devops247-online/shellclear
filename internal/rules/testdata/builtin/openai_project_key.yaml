@@ -1,0 +1,13 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "project key"
+  test: "export OPENAI_API_KEY=sk-proj-{{x*48}}"
+  expected: "sk-proj-{{x*48}}"
+
+- name: "anthropic key is not matched"
+  test: "sk-ant-api03-{{x*48}}"
+  expected: ""
+
+- name: "too short"
+  test: "sk-proj-short"
+  expected: ""

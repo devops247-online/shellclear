@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect Heroku Env api key
+  test: HEROKU_API_KEY=shellclear
+  expected: shellclear

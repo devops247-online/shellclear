@@ -1,0 +1,21 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "postgres"
+  test: "psql postgres://app:S3cretPass@db.internal:5432/app"
+  expected: "S3cretPass"
+
+- name: "mongodb+srv"
+  test: "mongosh \"mongodb+srv://admin:S3cretPass@cluster0.mongodb.net/db\""
+  expected: "S3cretPass"
+
+- name: "redis"
+  test: "redis-cli -u redis://default:S3cretPass@cache:6379"
+  expected: "S3cretPass"
+
+- name: "user without password"
+  test: "git clone ssh://deploy@git.internal/repo.git"
+  expected: ""
+
+- name: "password variable"
+  test: "psql postgres://app:$PGPASS@db/app"
+  expected: ""

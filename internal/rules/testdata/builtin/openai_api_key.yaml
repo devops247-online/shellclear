@@ -1,0 +1,13 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "project key with marker"
+  test: "OPENAI_API_KEY=sk-proj-{{A*20}}T3BlbkFJ{{B*20}}"
+  expected: "sk-proj-{{A*20}}T3BlbkFJ{{B*20}}"
+
+- name: "legacy key with marker"
+  test: "curl -d x sk-{{a*20}}T3BlbkFJ{{b*20}}"
+  expected: "sk-{{a*20}}T3BlbkFJ{{b*20}}"
+
+- name: "anthropic key is not matched"
+  test: "sk-ant-api03-{{a*40}}"
+  expected: ""

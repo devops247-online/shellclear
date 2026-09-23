@@ -1,0 +1,9 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "connection string"
+  test: "az storage blob list --connection-string \"DefaultEndpointsProtocol=https;AccountName=acc;AccountKey={{k*86}}==;EndpointSuffix=core.windows.net\""
+  expected: "{{k*86}}=="
+
+- name: "variable"
+  test: "AccountKey=$KEY"
+  expected: ""

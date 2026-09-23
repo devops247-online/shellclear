@@ -1,0 +1,7 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect curl -u user:pass
+  test: curl -u user:pass https://priv/
+  expected: user:pass
+- name: detect curl --user user:pass
+  test: curl --user user:pass https://priv/
+  expected: user:pass

@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect Slack Webhook
+  test: https://hooks.slack.com/services/shellclearSHELLCLEAR12345SHELLCLEARSHELLCLEAR
+  expected: shellclearSHELLCLEAR12345SHELLCLEARSHELLCLEAR

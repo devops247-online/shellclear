@@ -1,0 +1,9 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "header"
+  test: "curl -H \"X-Token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.{{s*43}}\" https://api"
+  expected: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.{{s*43}}"
+
+- name: "header part only"
+  test: "echo eyJhbGciOiJIUzI1NiJ9"
+  expected: ""

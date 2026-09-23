@@ -1,0 +1,9 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "twine"
+  test: "twine upload -u __token__ -p pypi-AgEIcHlwaS5vcmc{{x*60}} dist/*"
+  expected: "pypi-AgEIcHlwaS5vcmc{{x*60}}"
+
+- name: "prefix only"
+  test: "pypi-short"
+  expected: ""

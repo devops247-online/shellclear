@@ -1,0 +1,17 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "AKIA key"
+  test: "aws configure set aws_access_key_id AKIA{{Z*16}}"
+  expected: "AKIA{{Z*16}}"
+
+- name: "ASIA key"
+  test: "echo ASIA{{Q*16}}"
+  expected: "ASIA{{Q*16}}"
+
+- name: "too short"
+  test: "echo AKIA{{Z*15}}"
+  expected: ""
+
+- name: "inside a word"
+  test: "echo xAKIA{{Z*16}}"
+  expected: ""

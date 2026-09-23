@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect ReadMe io Api Key
+  test: README_API_KEY=shellclear
+  expected: shellclear

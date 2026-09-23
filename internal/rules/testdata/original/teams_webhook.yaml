@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect Teams Webhook
+  test: https://outlook.office.com/webhook/11111111111111111111111111111abf-111/@
+  expected: 11111111111111111111111111111abf-111

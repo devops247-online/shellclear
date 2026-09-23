@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect Twitter Client ID
+  test: TWITTER_CLIENT_ID:'shellclear3fsvgshellcler'
+  expected: shellclear3fsvgshellcler

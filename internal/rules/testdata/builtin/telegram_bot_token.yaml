@@ -1,0 +1,13 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "bot URL"
+  test: "curl https://api.telegram.org/bot123456789:AA{{x*33}}/getMe"
+  expected: "123456789:AA{{x*33}}"
+
+- name: "bare token"
+  test: "TOKEN=1234567890:AA{{y*33}} ./bot"
+  expected: "1234567890:AA{{y*33}}"
+
+- name: "short bot id"
+  test: "12345:AA{{x*33}}"
+  expected: ""

@@ -1,0 +1,17 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "bearer"
+  test: "curl -H \"Authorization: Bearer {{t*40}}\" https://api"
+  expected: "{{t*40}}"
+
+- name: "token"
+  test: "curl -H 'authorization: token {{t*40}}' https://api"
+  expected: "{{t*40}}"
+
+- name: "variable"
+  test: "curl -H \"Authorization: Bearer $TOKEN\" https://api"
+  expected: ""
+
+- name: "placeholder"
+  test: "curl -H \"Authorization: Bearer <token>\" https://api"
+  expected: ""

@@ -1,0 +1,13 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "service token"
+  test: "vault login hvs.{{x*24}}"
+  expected: "hvs.{{x*24}}"
+
+- name: "batch token"
+  test: "VAULT_TOKEN=hvb.{{x*30}} vault kv get x"
+  expected: "hvb.{{x*30}}"
+
+- name: "too short"
+  test: "hvs.short"
+  expected: ""

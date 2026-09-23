@@ -1,0 +1,13 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "secret key"
+  test: "stripe login --api-key sk_live_{{x*24}}"
+  expected: "sk_live_{{x*24}}"
+
+- name: "restricted key"
+  test: "export STRIPE=rk_live_{{x*30}}"
+  expected: "rk_live_{{x*30}}"
+
+- name: "test key"
+  test: "sk_test_{{x*24}}"
+  expected: ""

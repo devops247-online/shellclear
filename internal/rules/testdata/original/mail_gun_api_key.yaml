@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect MailGun API Key
+  test: key-123asZSDWq1331shellclearshellclear
+  expected: key-123asZSDWq1331shellclearshellcle

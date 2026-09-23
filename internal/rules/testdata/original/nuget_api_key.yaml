@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect NuGet API Key
+  test: oy2shellclear1shellclear9shellclearshellclearshellclear
+  expected: oy2shellclear1shellclear9shellclearshellclears

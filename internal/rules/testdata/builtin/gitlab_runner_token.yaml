@@ -1,0 +1,9 @@
+# Rule tests. "{{c*n}}" expands to c repeated n times; expected "" means no match.
+
+- name: "runner token"
+  test: "gitlab-runner register --token glrt-{{x*20}}"
+  expected: "glrt-{{x*20}}"
+
+- name: "too short"
+  test: "glrt-short"
+  expected: ""

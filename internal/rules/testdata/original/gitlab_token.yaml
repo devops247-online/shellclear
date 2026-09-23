@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect gitlab token environment variable
+  test: GITLAB_TOKEN=shellclear
+  expected: shellclear

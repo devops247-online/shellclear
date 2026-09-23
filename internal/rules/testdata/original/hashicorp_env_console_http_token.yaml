@@ -1,0 +1,4 @@
+# Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+- name: detect hashicorp Env console HTTP token
+  test: CONSUL_HTTP_TOKEN=shellclaer
+  expected: shellclaer
