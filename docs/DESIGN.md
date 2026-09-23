@@ -519,12 +519,3 @@ The sidecar keeps the real source path either way.
   by hand from `HistoryItem::write_to` and `WriteHistoryRange`. The fuzz
   target `FuzzShellWriters` reimplements each shell's writer and checks that
   the codec decodes its output back to the same command.
-
-## 9. Environment check (2026-09-23)
-
-- `go1.27.1 darwin/arm64` and `golangci-lint` are installed. GoReleaser is not
-  installed and is only needed in CI.
-- `gh` is logged in as `academ1c` (scopes `repo`, `workflow`) and is an admin
-  of `devops247-online`. `devops247-online/shellclear` and
-  `devops247-online/homebrew-tap` do not exist yet. Creating them is part of
-  stage 7 and needs explicit approval.
