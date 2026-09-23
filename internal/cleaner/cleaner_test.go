@@ -333,3 +333,15 @@ func TestApplyMissingFile(t *testing.T) {
 		t.Fatal("no error for a deleted file")
 	}
 }
+
+func TestMaskSecretInsideItsReplacement(t *testing.T) {
+	e := newEnv(t, Mask)
+	f := e.file(t, "h", "export DB_PASSWORD=secret\nls\n", history.Bash)
+	p, err := e.c.Plan(f)
+	if err != nil || len(p.Changes) != 1 || len(p.Skipped) != 0 {
+		t.Fatalf("plan: %+v, %v", p, err)
+	}
+	if want := "export DB_PASSWORD=[REDACTED:generic_secret_assignment]\nls\n"; string(p.New) != want {
+		t.Fatalf("new = %q, want %q", p.New, want)
+	}
+}

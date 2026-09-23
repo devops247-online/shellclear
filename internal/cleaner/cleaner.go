@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/devops247-online/shellclear/internal/history"
@@ -138,8 +139,15 @@ func maskEntry(codec history.Codec, e history.Entry, f scan.Finding) ([]byte, st
 	if len(after) != 1 {
 		return nil, "", history.ErrUnsafeEdit
 	}
+	// A secret such as "secret" can be part of its own replacement
+	// "[REDACTED:generic_secret_assignment]", so look for it only outside
+	// the replacements.
+	rest := after[0].Command
 	for _, m := range f.Matches {
-		if bytes.Contains([]byte(after[0].Command), []byte(m.Secret)) {
+		rest = strings.ReplaceAll(rest, Replacement(m.Rule.ID), "\x00")
+	}
+	for _, m := range f.Matches {
+		if strings.Contains(rest, m.Secret) {
 			return nil, "", history.ErrUnsafeEdit
 		}
 	}
