@@ -1,4 +1,6 @@
 # Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+# Changed: the value is generated at test time ({{c*n}} macro) so that no
+# token-shaped string is stored in the repository.
 - name: detect SendGrid API Token
-  test: SG.shellcleardH0bSHADAAs2.9Shellclaer_SdadvcCFG33dsSDFDD1
-  expected: SG.shellcleardH0bSHADAAs2.9Shellclaer_SdadvcCFG33dsSDFDD
+  test: SG.{{s*22}}.{{T*30}}1
+  expected: SG.{{s*22}}.{{T*30}}

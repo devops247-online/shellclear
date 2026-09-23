@@ -1,4 +1,6 @@
 # Ported from rusty-ferris-club/shellclear tests/suites_sensitive_patterns (Apache-2.0).
+# Changed: the value is generated at test time ({{c*n}} macro) so that no
+# token-shaped string is stored in the repository.
 - name: detect MailChimp API Key
-  test: 2313131abcfaaaaaaaaaaaaaaaaaaaaa-us01
-  expected: 2313131abcfaaaaaaaaaaaaaaaaaaaaa-us01
+  test: {{a*32}}-us01
+  expected: {{a*32}}-us01
