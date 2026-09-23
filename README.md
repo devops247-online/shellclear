@@ -1,5 +1,9 @@
 # shellclear
 
+[![CI](https://github.com/devops247-online/shellclear/actions/workflows/ci.yml/badge.svg)](https://github.com/devops247-online/shellclear/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/devops247-online/shellclear)](https://github.com/devops247-online/shellclear/releases)
+[![License](https://img.shields.io/github/license/devops247-online/shellclear)](LICENSE)
+
 **Find secrets in your shell history and remove them without breaking the history file.**
 
 Tokens, passwords and keys end up in shell history all the time: `export GITHUB_TOKEN=…`,
@@ -51,7 +55,8 @@ history file first:
 
 ## Install
 
-**Homebrew** (macOS and Linux, from v0.1.0):
+**Homebrew** (macOS and Linux, from v0.1.0). The formula builds `shellclear` from the
+tagged source, so there is no unsigned binary for Gatekeeper to quarantine:
 
 ```sh
 brew install devops247-online/tap/shellclear
@@ -63,8 +68,19 @@ brew install devops247-online/tap/shellclear
 go install github.com/devops247-online/shellclear/cmd/shellclear@latest
 ```
 
-**Prebuilt binaries** for macOS, Linux and Windows are attached to every
-[release](https://github.com/devops247-online/shellclear/releases).
+**Prebuilt binaries and packages.** Every
+[release](https://github.com/devops247-online/shellclear/releases) includes archives for
+macOS, Linux and Windows, plus `.deb`, `.rpm` and `.apk` packages and `checksums.txt`.
+Each artifact has a signed build provenance attestation:
+
+```sh
+gh attestation verify shellclear_0.1.0_linux_amd64.tar.gz -R devops247-online/shellclear
+sudo apt install ./shellclear_0.1.0_amd64.deb
+```
+
+macOS marks binaries downloaded with a browser as quarantined. The release binaries are
+not notarized, so remove the mark after checking the attestation:
+`xattr -d com.apple.quarantine ./shellclear`.
 
 **From source:**
 
@@ -331,11 +347,16 @@ shellclear config init --import-legacy
 ## Development
 
 ```sh
-make test     # go test -race -cover ./...
-make lint     # golangci-lint
-make fuzz     # fuzz every history codec (FUZZTIME=30s each)
-make bench    # BenchmarkScan100k
+make test       # go test -race -cover ./...
+make lint       # golangci-lint
+make fuzz       # fuzz every history codec (FUZZTIME=30s each)
+make bench      # BenchmarkScan100k
+make snapshot   # build all release artifacts into dist/ without publishing
 ```
+
+Releases are cut by pushing a `vX.Y.Z` tag. GoReleaser builds the artifacts, the release
+workflow attests them and updates the Homebrew formula in
+[devops247-online/homebrew-tap](https://github.com/devops247-online/homebrew-tap).
 
 Scanning 100,000 history records with all rules takes about 26 ms on an Apple M4 Max.
 

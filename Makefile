@@ -3,7 +3,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 FUZZTIME ?= 30s
 
-.PHONY: build test lint fuzz bench install clean
+.PHONY: build test lint fuzz bench snapshot install clean
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/shellclear ./cmd/shellclear
@@ -21,6 +21,9 @@ fuzz:
 
 bench:
 	go test ./internal/scan/ -run "^$$" -bench . -benchmem
+
+snapshot:
+	goreleaser release --snapshot --clean
 
 install:
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/shellclear
