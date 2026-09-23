@@ -15,6 +15,7 @@ type File struct {
 	Path     string // as given or discovered
 	RealPath string // after resolving symlinks
 	Shell    Shell
+	Tool     string // AI assistant that wrote the file, empty for shells
 }
 
 // Env is everything Detect needs from the operating system. Tests replace
@@ -26,6 +27,7 @@ type Env struct {
 	Stat     func(string) (fs.FileInfo, error)
 	Glob     func(string) ([]string, error)
 	Realpath func(string) (string, error)
+	WalkDir  func(string, fs.WalkDirFunc) error // nil means filepath.WalkDir
 }
 
 // OSEnv returns an Env backed by the real operating system.
@@ -41,6 +43,7 @@ func OSEnv() (Env, error) {
 		Stat:     os.Stat,
 		Glob:     filepath.Glob,
 		Realpath: filepath.EvalSymlinks,
+		WalkDir:  filepath.WalkDir,
 	}, nil
 }
 
@@ -49,6 +52,8 @@ func ShellFromName(path string) (Shell, bool) {
 	base := strings.ToLower(filepath.Base(path))
 	dir := strings.ToLower(filepath.Base(filepath.Dir(path)))
 	switch {
+	case strings.HasSuffix(base, ".jsonl"), strings.HasSuffix(base, ".json"):
+		return JSON, true
 	case base == "consolehost_history.txt":
 		return PowerShell, true
 	case strings.Contains(base, "fish"):
@@ -132,6 +137,7 @@ type detector struct {
 	env   Env
 	seen  map[string]bool
 	files []File
+	tool  string // set on files added from now on
 }
 
 func (d *detector) addExplicit(p string, shell Shell) error {
@@ -176,7 +182,7 @@ func (d *detector) add(p string, s Shell) {
 		return
 	}
 	d.seen[resolved] = true
-	d.files = append(d.files, File{Path: p, RealPath: resolved, Shell: s})
+	d.files = append(d.files, File{Path: p, RealPath: resolved, Shell: s, Tool: d.tool})
 }
 
 func expandHome(p, home string) string {

@@ -24,10 +24,13 @@ const (
 	Bash       Shell = "bash"
 	Fish       Shell = "fish"
 	PowerShell Shell = "powershell"
+	// JSON is not a shell: it is the JSON Lines and JSON files where AI
+	// coding assistants keep prompts and session transcripts.
+	JSON Shell = "json"
 )
 
 // Shells lists every supported format in a stable order.
-var Shells = []Shell{Zsh, Bash, Fish, PowerShell}
+var Shells = []Shell{Zsh, Bash, Fish, PowerShell, JSON}
 
 // ParseShell converts a user-supplied name into a Shell.
 func ParseShell(name string) (Shell, error) {
@@ -40,8 +43,10 @@ func ParseShell(name string) (Shell, error) {
 		return Fish, nil
 	case "powershell", "pwsh":
 		return PowerShell, nil
+	case "json", "jsonl":
+		return JSON, nil
 	}
-	return "", fmt.Errorf("unknown shell %q (want zsh, bash, fish or powershell)", name)
+	return "", fmt.Errorf("unknown shell %q (want zsh, bash, fish, powershell or json)", name)
 }
 
 // Entry is one history record.
@@ -90,6 +95,8 @@ func CodecFor(s Shell) (Codec, error) {
 		return fishCodec{}, nil
 	case PowerShell:
 		return powershellCodec{}, nil
+	case JSON:
+		return jsonCodec{}, nil
 	}
 	return nil, fmt.Errorf("unsupported shell %q", s)
 }
