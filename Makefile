@@ -3,7 +3,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 FUZZTIME ?= 30s
 
-.PHONY: build test lint fuzz bench security snapshot install clean
+.PHONY: build test lint fuzz bench security hooks snapshot install clean
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/shellclear ./cmd/shellclear
@@ -24,6 +24,10 @@ bench:
 
 security:
 	scripts/security-scan.sh
+
+hooks:
+	ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
+	@echo "pre-push hook installed: Trivy runs before every push"
 
 snapshot:
 	goreleaser release --snapshot --clean
