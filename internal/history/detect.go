@@ -163,17 +163,17 @@ func (d *detector) addIfExists(p string, s Shell) {
 }
 
 func (d *detector) add(p string, s Shell) {
-	real := p
+	resolved := p
 	if d.env.Realpath != nil {
 		if r, err := d.env.Realpath(p); err == nil {
-			real = r
+			resolved = r
 		}
 	}
-	if d.seen[real] {
+	if d.seen[resolved] {
 		return
 	}
-	d.seen[real] = true
-	d.files = append(d.files, File{Path: p, RealPath: real, Shell: s})
+	d.seen[resolved] = true
+	d.files = append(d.files, File{Path: p, RealPath: resolved, Shell: s})
 }
 
 func expandHome(p, home string) string {

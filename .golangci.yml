@@ -1,0 +1,22 @@
+version: "2"
+linters:
+  enable:
+    - errorlint
+    - gocritic
+    - misspell
+    - revive
+    - unconvert
+  settings:
+    errcheck:
+      exclude-functions:
+        # Writes to the terminal: a failure has nowhere to be reported.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).WriteString
+        # Closing a file that was only read.
+        - (*os.File).Close
+formatters:
+  enable:
+    - gofmt
+    - goimports

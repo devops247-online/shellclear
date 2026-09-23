@@ -366,7 +366,7 @@ func TestValidSecret(t *testing.T) {
 }
 
 func TestSeverity(t *testing.T) {
-	for in, want := range map[string]Severity{"low": Low, "MEDIUM": Medium, "": Medium, " high ": High} {
+	for in, want := range map[string]Severity{"low": Low, "MEDIUM": Medium, "": Medium, "\thigh\n": High} {
 		got, err := ParseSeverity(in)
 		if err != nil || got != want {
 			t.Errorf("ParseSeverity(%q) = %v, %v", in, got, err)
