@@ -1,0 +1,6 @@
+Get-ChildItem
+$env:GITHUB_TOKEN = "ghp_aaaaBBBBccccDDDDeeeeFFFFgggg1234abcd"
+Invoke-RestMethod -Uri https://example.org `
+  -Headers @{Authorization = "Bearer abc"}`
+Write-Host done
+echo привіт

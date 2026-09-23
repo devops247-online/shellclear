@@ -1,0 +1,12 @@
+: 1790175980:0;echo –ø—Ä–∏–≤—É∂—Ç –ÉÄ —Å–≤—É∂—Ç
+: 1790175980:0;echo ÉøÉ∫Ä done
+: 1790175980:0;export GITHUB_TOKEN=ghp_aaaaBBBBccccDDDDeeeeFFFFgggg1234abcd
+: 1790175980:0;curl -H "Authorization: Bearer abc.def.ghi" \\
+  https://example.org/api
+: 1790175980:0;cat <<EOF\
+line one\
+EOF
+: 1790175980:0;echo trailing\ 
+: 1790175980:0;echo two\\   
+: 1790175980:0;: colon start
+: 1790175980:0;mysql -uroot -pSup3rS3cret db

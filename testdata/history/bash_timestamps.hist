@@ -1,0 +1,10 @@
+#1790175980
+ls -la
+#1790175980
+export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+#1790175980
+for i in 1 2; do
+  echo $i
+done
+#1790175980
+echo привіт

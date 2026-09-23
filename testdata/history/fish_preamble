@@ -1,0 +1,7 @@
+%YAML 1.1
+---
+- cmd: echo one
+  when: 1
+...
+- cmd: echo two
+  when: 2

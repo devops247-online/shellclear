@@ -1,0 +1,3 @@
+ls -la
+docker login -u me -p hunter2hunter2 registry.example.org
+echo done
