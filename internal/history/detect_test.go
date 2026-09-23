@@ -173,6 +173,8 @@ func TestShellFromName(t *testing.T) {
 		"/h/.bash_history":                  "bash",
 		"/h/.local/share/fish/fish_history": "fish",
 		`/h/ConsoleHost_history.txt`:        "powershell",
+		"/h/.claude/history.jsonl":          "json",
+		"/h/.gemini/tmp/x/logs.json":        "json",
 		"/h/other.history":                  "",
 	}
 	for p, want := range cases {
@@ -207,4 +209,53 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestDetectAI(t *testing.T) {
+	h := newFakeHome(t)
+	claudeHist := h.touch(".claude/history.jsonl")
+	session := h.touch(".claude/projects/-home-me-app/0f.jsonl")
+	subagent := h.touch(".claude/projects/-home-me-app/0f/subagents/agent-a1.jsonl")
+	h.touch(".claude/projects/-home-me-app/0f/tool-results/x.txt")
+	h.touch(".claude/settings.json")
+	codexHist := h.touch("codex-home/history.jsonl")
+	rollout := h.touch("codex-home/sessions/2026/09/21/rollout-1.jsonl")
+	archived := h.touch("codex-home/archived_sessions/rollout-0.jsonl")
+	h.touch(".codex/history.jsonl") // ignored: $CODEX_HOME wins
+	logs := h.touch(".gemini/tmp/abc/logs.json")
+	chat := h.touch(".gemini/tmp/abc/chats/session-1.json")
+	shell := h.touch(".gemini/tmp/abc/shell_history")
+	qwen := h.touch(".qwen/tmp/def/logs.json")
+	h.vars["CODEX_HOME"] = filepath.Join(h.home, "codex-home")
+
+	got := DetectAI(h.env("linux"))
+	want := []string{
+		claudeHist + "|json", subagent + "|json", session + "|json",
+		codexHist + "|json", rollout + "|json", archived + "|json",
+		logs + "|json", chat + "|json", shell + "|bash",
+		qwen + "|json",
+	}
+	if p := paths(got); !equalStrings(p, want) {
+		t.Fatalf("DetectAI =\n%q\nwant\n%q", p, want)
+	}
+	tools := map[string]string{}
+	for _, f := range got {
+		tools[f.Path] = f.Tool
+	}
+	if tools[claudeHist] != ClaudeCode || tools[rollout] != Codex || tools[shell] != GeminiCLI || tools[qwen] != QwenCode {
+		t.Fatalf("tools = %v", tools)
+	}
+}
+
+func TestDetectAIConfigDirAndEmptyHome(t *testing.T) {
+	h := newFakeHome(t)
+	if got := DetectAI(h.env("linux")); len(got) != 0 {
+		t.Fatalf("empty home: %v", paths(got))
+	}
+	p := h.touch("cfg/claude/history.jsonl")
+	h.touch(".claude/history.jsonl")
+	h.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(h.home, "cfg/claude")
+	if got := paths(DetectAI(h.env("linux"))); !equalStrings(got, []string{p + "|json"}) {
+		t.Fatalf("DetectAI = %q", got)
+	}
 }

@@ -15,7 +15,7 @@ lint:
 	golangci-lint run ./...
 
 fuzz:
-	@for t in FuzzZshParse FuzzBashParse FuzzFishParse FuzzPowerShellParse FuzzShellWriters; do \
+	@for t in FuzzZshParse FuzzBashParse FuzzFishParse FuzzPowerShellParse FuzzJSONParse FuzzJSONWriter FuzzShellWriters; do \
 		echo "== $$t"; go test ./internal/history/ -run "^$$" -fuzz "^$$t$$" -fuzztime $(FUZZTIME) || exit 1; \
 	done
 

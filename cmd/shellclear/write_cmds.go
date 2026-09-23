@@ -21,17 +21,27 @@ import (
 // edited safely.
 var errSecretsRemain = errors.New("some secrets could not be removed")
 
+// keepPlanBytes caps the file content clear holds in memory between showing
+// what it will change and writing. Plans beyond it (AI transcripts can add up
+// to gigabytes) are computed again right before writing.
+var keepPlanBytes = 256 << 20
+
 func (a *App) stateDir(g *globals) state.Dir {
 	return state.Dir{Root: config.Dir(g.configDir, a.Env.Getenv, a.Env.Home)}
 }
 
-// restartHints tells the user how to stop running shells from writing the
-// old history back from memory.
-var restartHints = map[history.Shell]string{
-	history.Zsh:        "zsh: run 'exec zsh' in every open terminal",
-	history.Bash:       "bash: run 'history -c; history -r' in every open terminal",
-	history.Fish:       "fish: run 'history merge' in every open terminal",
-	history.PowerShell: "PowerShell: restart open sessions",
+// restartHints tells the user how to stop running shells and AI assistants
+// from writing the old history back. Keys are output.Kind values.
+var restartHints = map[string]string{
+	string(history.Zsh):        "zsh: run 'exec zsh' in every open terminal",
+	string(history.Bash):       "bash: run 'history -c; history -r' in every open terminal",
+	string(history.Fish):       "fish: run 'history merge' in every open terminal",
+	string(history.PowerShell): "PowerShell: restart open sessions",
+	string(history.JSON):       "AI assistants: restart running sessions",
+	history.ClaudeCode:         "Claude Code: restart running sessions; they keep appending to their transcript",
+	history.Codex:              "Codex: restart running sessions; they keep appending to their transcript",
+	history.GeminiCLI:          "Gemini CLI: restart running sessions",
+	history.QwenCode:           "Qwen Code: restart running sessions",
 }
 
 // memoryHints clears the in-memory history of the current shell after stash.
@@ -42,8 +52,8 @@ var memoryHints = map[history.Shell]string{
 	history.PowerShell: "PowerShell: [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory()",
 }
 
-func sortedShells(set map[history.Shell]bool) []history.Shell {
-	var out []history.Shell
+func sortedKeys[K ~string](set map[K]bool) []K {
+	var out []K
 	for s := range set {
 		out = append(out, s)
 	}
@@ -96,8 +106,11 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 		Mode:    mode, State: a.stateDir(g), Backup: !noBackup, Now: a.Now,
 	}
 
+	// Each file is reported as soon as it is planned. Its plan is kept for
+	// writing while it fits in keepPlanBytes; otherwise only the file is.
 	var plans []*cleaner.Plan
-	total := 0
+	total, kept := 0, 0
+	home := a.Env.Home
 	for _, f := range files {
 		p, err := cl.Plan(f)
 		if err != nil {
@@ -106,32 +119,18 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 		if len(p.Changes) == 0 && len(p.Skipped) == 0 {
 			continue
 		}
-		plans = append(plans, p)
 		total += len(p.Changes)
+		a.reportPlan(p, mode, verb, dryRun)
+		if size := len(p.Orig) + len(p.New); kept+size <= keepPlanBytes {
+			kept += size
+			plans = append(plans, p)
+		} else {
+			plans = append(plans, &cleaner.Plan{File: p.File})
+		}
 	}
-	home := a.Env.Home
 	if len(plans) == 0 {
 		fmt.Fprintf(a.Stdout, "No secrets found in %d history %s.\n", len(files), pluralize(len(files), "file", "files"))
 		return exitOK, nil
-	}
-
-	for _, p := range plans {
-		fmt.Fprintf(a.Stdout, "%s (%s): %d %s to %s\n", displayPath(p.File.Path, home), p.File.Shell,
-			len(p.Changes), pluralize(len(p.Changes), "command", "commands"), verb)
-		if dryRun {
-			for _, c := range p.Changes {
-				fmt.Fprintf(a.Stdout, "  L%-6d %s\n", c.Finding.Line, strings.Join(ruleIDs(c.Finding), ","))
-				fmt.Fprintf(a.Stdout, "    - %s\n", output.MaskCommand(c.Finding.Command, c.Finding.Matches))
-				if mode == cleaner.Mask {
-					fmt.Fprintf(a.Stdout, "    + %s\n", output.Sanitize(c.After))
-				} else {
-					fmt.Fprintf(a.Stdout, "    + (removed)\n")
-				}
-			}
-		}
-		for _, s := range p.Skipped {
-			fmt.Fprintf(a.Stderr, "shellclear: warning: %s line %d cannot be edited safely and will be left as is\n", displayPath(p.File.Path, home), s.Line)
-		}
 	}
 	if dryRun {
 		fmt.Fprintln(a.Stdout, "Dry run: nothing was written.")
@@ -151,10 +150,15 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 		}
 	}
 
-	touched := map[history.Shell]bool{}
+	touched := map[string]bool{}
 	remaining := 0
 	defer a.invalidateCache(g)
 	for _, p := range plans {
+		if p.Orig == nil {
+			if p, err = cl.Plan(p.File); err != nil {
+				return exitError, err
+			}
+		}
 		out, err := cl.Apply(p)
 		if err != nil {
 			return exitError, fmt.Errorf("%s: %w", displayPath(p.File.Path, home), err)
@@ -164,7 +168,7 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 		if !out.Written {
 			continue
 		}
-		touched[p.File.Shell] = true
+		touched[output.Kind(p.File)] = true
 		past := map[cleaner.Mode]string{cleaner.Mask: "masked", cleaner.Remove: "removed"}[mode]
 		fmt.Fprintf(a.Stdout, "%s: %s %d %s", displayPath(p.File.Path, home), past, n, pluralize(n, "command", "commands"))
 		if len(out.TailChanges) > 0 {
@@ -177,7 +181,7 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 	}
 	if len(touched) > 0 {
 		fmt.Fprintln(a.Stdout, "\nRunning shells keep the old history in memory and may write it back:")
-		for _, s := range sortedShells(touched) {
+		for _, s := range sortedKeys(touched) {
 			fmt.Fprintf(a.Stdout, "  %s\n", restartHints[s])
 		}
 		if !noBackup {
@@ -190,6 +194,27 @@ func (a *App) cmdClear(g *globals, args []string) (int, error) {
 	return exitOK, nil
 }
 
+// reportPlan prints what clear will change in one file.
+func (a *App) reportPlan(p *cleaner.Plan, mode cleaner.Mode, verb string, dryRun bool) {
+	home := a.Env.Home
+	fmt.Fprintf(a.Stdout, "%s (%s): %d %s to %s\n", displayPath(p.File.Path, home), output.Kind(p.File),
+		len(p.Changes), pluralize(len(p.Changes), "command", "commands"), verb)
+	if dryRun {
+		for _, c := range p.Changes {
+			fmt.Fprintf(a.Stdout, "  L%-6d %s\n", c.Finding.Line, strings.Join(ruleIDs(c.Finding), ","))
+			fmt.Fprintf(a.Stdout, "    - %s\n", output.MaskExcerpt(c.Finding.Command, c.Finding.Matches))
+			if mode == cleaner.Mask {
+				fmt.Fprintf(a.Stdout, "    + %s\n", output.ExcerptAround(c.After, "[REDACTED:"))
+			} else {
+				fmt.Fprintf(a.Stdout, "    + (removed)\n")
+			}
+		}
+	}
+	for _, s := range p.Skipped {
+		fmt.Fprintf(a.Stderr, "shellclear: warning: %s line %d cannot be edited safely and will be left as is\n", displayPath(p.File.Path, home), s.Line)
+	}
+}
+
 func (a *App) ops(g *globals) *cleaner.Ops {
 	return &cleaner.Ops{State: a.stateDir(g), Now: a.Now}
 }
@@ -198,6 +223,9 @@ func (a *App) cmdStash(g *globals, args []string) (int, error) {
 	help, err := parseCommand("stash", g, args, func(*flag.FlagSet) {}, a.Stdout)
 	if help || err != nil {
 		return exitOK, err
+	}
+	if g.ai {
+		return exitError, usageError{"stash: --ai is not supported; AI assistants need their history to resume sessions"}
 	}
 	files, err := a.detect(g)
 	if err != nil {
@@ -228,7 +256,7 @@ func (a *App) cmdStash(g *globals, args []string) (int, error) {
 	}
 	if len(shells) > 0 {
 		fmt.Fprintln(a.Stdout, "\nThe current shell still remembers its history. Clear it in memory:")
-		for _, s := range sortedShells(shells) {
+		for _, s := range sortedKeys(shells) {
 			fmt.Fprintf(a.Stdout, "  %s\n", memoryHints[s])
 		}
 		fmt.Fprintln(a.Stdout, "Run 'shellclear pop' to bring the history back.")
@@ -240,6 +268,9 @@ func (a *App) cmdPop(g *globals, args []string) (int, error) {
 	help, err := parseCommand("pop", g, args, func(*flag.FlagSet) {}, a.Stdout)
 	if help || err != nil {
 		return exitOK, err
+	}
+	if g.ai {
+		return exitError, usageError{"pop: --ai is not supported"}
 	}
 	files, err := a.detect(g)
 	if err != nil {
@@ -344,7 +375,7 @@ func (a *App) cmdRestore(g *globals, args []string) (int, error) {
 	if res.Backup != nil {
 		fmt.Fprintf(a.Stdout, "  previous content backed up as %s\n", res.Backup.Name)
 	}
-	fmt.Fprintf(a.Stdout, "  %s\n", restartHints[b.Meta.Shell])
+	fmt.Fprintf(a.Stdout, "  %s\n", restartHints[string(b.Meta.Shell)])
 	return exitOK, nil
 }
 

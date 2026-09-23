@@ -10,7 +10,8 @@
 Tokens, passwords and keys end up in shell history all the time: `export GITHUB_TOKEN=…`,
 `mysql -p…`, `curl -H "Authorization: Bearer …"`, a `printf` into `~/.netrc`.
 `shellclear` finds them in zsh, bash, fish and PowerShell history, masks or removes
-them, and can hide your history before you share your screen.
+them, and can hide your history before you share your screen. With `--ai` it also
+checks the chat histories of AI coding assistants such as Claude Code and Codex.
 
 ```
 $ shellclear find
@@ -121,7 +122,8 @@ Global flags work before or after the command name:
 
 ```
 --file PATH        use this history file instead of auto-detection (repeatable)
---shell NAME       format of --file: zsh, bash, fish or powershell
+--shell NAME       format of --file: zsh, bash, fish, powershell or json
+--ai               also check AI coding assistant histories (see below)
 --config-dir DIR   config and state directory (default: $SHELLCLEAR_HOME or ~/.shellclear)
 --no-color         disable colors (NO_COLOR is honored too)
 --no-banner        do not print the logo
@@ -246,6 +248,38 @@ The format handling follows the shells' own source code. That includes zsh
 metafication, extended history and backslash continuations, bash multi-line records,
 fish escaping and PSReadLine backtick continuations.
 
+### AI coding assistants
+
+Prompts you type into an AI coding assistant, and the output of commands it runs for
+you (`cat .env`, `env`, `curl -v`, `kubectl get secret -o yaml`), are saved on disk
+like shell history. Pass `--ai` to `find`, `clear` or `motd` to check them too:
+
+```sh
+shellclear find --ai
+shellclear clear --ai --dry-run
+```
+
+| Assistant | Files |
+|---|---|
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/history.jsonl`, `projects/**/*.jsonl` (sessions and subagents) |
+| Codex CLI | `${CODEX_HOME:-~/.codex}/history.jsonl`, `sessions/**/*.jsonl`, `archived_sessions/**/*.jsonl` |
+| Gemini CLI | `~/.gemini/tmp/*/logs.json`, `~/.gemini/tmp/*/chats/*.json`, `~/.gemini/tmp/*/shell_history` |
+| Qwen Code | the same layout under `~/.qwen/tmp` |
+
+Each line of a JSON Lines file, or of a pretty-printed JSON file, is checked as one
+record. Only string values are scanned and edited. Keys, numbers and layout stay byte
+for byte, and a JSON Lines record must still be valid JSON after the edit. Long records
+are shown as excerpts around each secret.
+
+Session transcripts can add up to gigabytes, so `find --ai` and `clear --ai` can take a
+few minutes. Use `--file` with `--shell json` to check a single transcript. `motd --ai`
+caches its results like `motd`, but its first run scans everything: run it once by hand
+before adding it to your shell profile.
+
+`stash` and `pop` do not take `--ai`, because the assistants need these files to
+resume sessions. Quit running assistant sessions before `clear --ai`: a session that
+is still open can keep appending to its old transcript.
+
 ## Detection rules
 
 There are 60+ built-in rules: all patterns of the original shellclear, plus current
@@ -338,6 +372,8 @@ shellclear config init --import-legacy
   file to `SAVEHIST`. After `clear`, restart every open shell with `exec zsh`, or
   `history -c; history -r` in bash, or `history merge` in fish. This includes IDE
   terminals and tmux panes.
+- **Running AI assistants keep writing.** Claude Code and Codex append to the
+  transcript of an open session. Quit them before `clear --ai` and restart them after.
 - **Backups contain the secrets.** Delete them with `shellclear restore --prune --keep 0`
   once you are sure.
 - **Other copies are out of reach.** Time Machine or other backups, terminal

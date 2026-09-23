@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/devops247-online/shellclear/internal/history"
 	"github.com/devops247-online/shellclear/internal/rules"
@@ -247,5 +248,46 @@ func TestFancySummary(t *testing.T) {
 	_ = Write(&buf, Text, results(t), Options{Fancy: true})
 	if !strings.Contains(buf.String(), "🔑 2 sensitive commands") {
 		t.Fatalf("summary = %q", buf.String())
+	}
+}
+
+func TestMaskExcerpt(t *testing.T) {
+	rs, _ := rules.Builtin()
+	set, _ := rules.NewSet(nil, rs)
+	short := "export GITHUB_TOKEN=" + secrets[0]
+	if got, want := MaskExcerpt(short, set.Find(short)), MaskCommand(short, set.Find(short)); got != want {
+		t.Fatalf("short command: %q, want %q", got, want)
+	}
+	pad := strings.Repeat("x", 500)
+	long := "é" + pad + "\nexport GITHUB_TOKEN=" + secrets[0] + "\n" + pad + "\nsshpass -p " + secrets[2] + " ssh h\n" + pad
+	got := MaskExcerpt(long, set.Find(long))
+	for _, s := range secrets {
+		if strings.Contains(got, s) {
+			t.Fatalf("excerpt leaks %q: %q", s, got)
+		}
+	}
+	if !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") || strings.Count(got, "…") != 3 ||
+		!strings.Contains(got, `\nexport GITHUB_TOKEN=ghp_****aaaa\n`) || !strings.Contains(got, `sshpass -p **** ssh h`) {
+		t.Fatalf("excerpt = %q", got)
+	}
+	if len(got) > 400 || !utf8.ValidString(got) {
+		t.Fatalf("excerpt has %d bytes", len(got))
+	}
+}
+
+func TestExcerptAround(t *testing.T) {
+	pad := strings.Repeat("y", 300)
+	got := ExcerptAround(pad+"k=[REDACTED:r] "+pad, "[REDACTED:")
+	if got != "…"+strings.Repeat("y", 58)+"k=[REDACTED:r] "+strings.Repeat("y", 60-len("r] "))+"…" {
+		t.Fatalf("ExcerptAround = %q", got)
+	}
+	if got := ExcerptAround("short\x1b", "[REDACTED:"); got != `short\x1b` {
+		t.Fatalf("short text = %q", got)
+	}
+}
+
+func TestKind(t *testing.T) {
+	if Kind(history.File{Shell: history.JSON, Tool: history.Codex}) != "codex" || Kind(history.File{Shell: history.Zsh}) != "zsh" {
+		t.Fatal("Kind")
 	}
 }

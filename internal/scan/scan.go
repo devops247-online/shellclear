@@ -14,8 +14,13 @@ import (
 	"github.com/devops247-online/shellclear/internal/rules"
 )
 
-// chunkSize is the number of entries one worker handles at a time.
-const chunkSize = 2048
+// A worker handles up to chunkSize entries or chunkBytes of command text at
+// a time. The byte limit spreads files with few but long entries, such as AI
+// session transcripts, across workers too.
+const (
+	chunkSize  = 2048
+	chunkBytes = 256 << 10
+)
 
 // Finding is one command that contains at least one secret.
 type Finding struct {
@@ -78,9 +83,9 @@ func (s *Scanner) ScanEntries(entries []history.Entry) []Finding {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	chunks := (len(entries) + chunkSize - 1) / chunkSize
-	if workers > chunks {
-		workers = chunks
+	chunks := chunkStarts(entries)
+	if workers > len(chunks) {
+		workers = len(chunks)
 	}
 
 	if workers <= 1 {
@@ -92,14 +97,17 @@ func (s *Scanner) ScanEntries(entries []history.Entry) []Finding {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for start := range next {
-					end := min(start+chunkSize, len(entries))
-					s.scanRange(entries, matches, start, end)
+				for i := range next {
+					end := len(entries)
+					if i+1 < len(chunks) {
+						end = chunks[i+1]
+					}
+					s.scanRange(entries, matches, chunks[i], end)
 				}
 			}()
 		}
-		for start := 0; start < len(entries); start += chunkSize {
-			next <- start
+		for i := range chunks {
+			next <- i
 		}
 		close(next)
 		wg.Wait()
@@ -114,6 +122,21 @@ func (s *Scanner) ScanEntries(entries []history.Entry) []Finding {
 		out = append(out, Finding{Entry: i, Line: e.Line, Time: e.Time, Command: e.Command, Matches: ms})
 	}
 	return out
+}
+
+// chunkStarts splits entries into chunks and returns the first index of each.
+func chunkStarts(entries []history.Entry) []int {
+	var starts []int
+	n, size := 0, 0
+	for i := range entries {
+		if i == 0 || n == chunkSize || size >= chunkBytes {
+			starts = append(starts, i)
+			n, size = 0, 0
+		}
+		n++
+		size += len(entries[i].Command)
+	}
+	return starts
 }
 
 func (s *Scanner) scanRange(entries []history.Entry, out [][]rules.Match, start, end int) {

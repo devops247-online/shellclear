@@ -51,6 +51,7 @@ type globals struct {
 	configDir string
 	files     multiFlag
 	shell     string
+	ai        bool
 	noColor   bool
 	noBanner  bool
 	initShell bool
@@ -69,7 +70,8 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 func (g *globals) register(fs *flag.FlagSet) {
 	fs.StringVar(&g.configDir, "config-dir", g.configDir, "config and state directory (default $SHELLCLEAR_HOME or ~/.shellclear)")
 	fs.Var(&g.files, "file", "history file to use instead of auto-detection (repeatable)")
-	fs.StringVar(&g.shell, "shell", g.shell, "format of --file: zsh, bash, fish or powershell")
+	fs.StringVar(&g.shell, "shell", g.shell, "format of --file: zsh, bash, fish, powershell or json")
+	fs.BoolVar(&g.ai, "ai", g.ai, "also check chat histories of AI coding assistants (Claude Code, Codex, Gemini CLI, Qwen Code)")
 	fs.BoolVar(&g.noColor, "no-color", g.noColor, "disable colors")
 	fs.BoolVar(&g.noBanner, "no-banner", g.noBanner, "do not print the logo")
 	fs.BoolVar(&g.initShell, "init-shell", g.initShell, "same as 'motd' but prints to stderr (compatible with the original shellclear)")
@@ -101,7 +103,9 @@ Commands:
 Global flags:
   --config-dir DIR   config and state directory (default: $SHELLCLEAR_HOME or ~/.shellclear)
   --file PATH        history file to use instead of auto-detection (repeatable)
-  --shell NAME       format of --file: zsh, bash, fish or powershell
+  --shell NAME       format of --file: zsh, bash, fish, powershell or json
+  --ai               also check chat histories of AI coding assistants
+                     (Claude Code, Codex, Gemini CLI, Qwen Code)
   --no-color         disable colors (also honors NO_COLOR)
   --no-banner        do not print the logo
   --init-shell       same as 'motd', printed to stderr (original shellclear style)
@@ -250,12 +254,31 @@ func (a *App) detect(g *globals) ([]history.File, error) {
 		}
 		shell = s
 	}
-	files, err := history.Detect(a.Env, g.files, shell)
+	files, err := detectFiles(a.Env, g, shell)
 	if err != nil {
 		return nil, err
 	}
 	for _, f := range files {
-		a.verbosef(g, "history: %s (%s)", f.Path, f.Shell)
+		a.verbosef(g, "history: %s (%s)", f.Path, output.Kind(f))
+	}
+	return files, nil
+}
+
+// detectFiles finds shell histories and, with --ai, AI assistant histories.
+// Files given with --file replace both.
+func detectFiles(env history.Env, g *globals, shell history.Shell) ([]history.File, error) {
+	files, err := history.Detect(env, g.files, shell)
+	if err != nil || !g.ai || len(g.files) > 0 {
+		return files, err
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		seen[f.RealPath] = true
+	}
+	for _, f := range history.DetectAI(env) {
+		if !seen[f.RealPath] {
+			files = append(files, f)
+		}
 	}
 	return files, nil
 }
@@ -301,6 +324,9 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 		}
 		r.Findings = scan.FilterSeverity(r.Findings, minSev)
 		a.verbosef(g, "scanned %s: %d entries, %d findings in %s", hf.Path, len(r.Entries), len(r.Findings), time.Since(start).Round(time.Millisecond))
+		// Only findings are reported. AI transcripts can add up to
+		// gigabytes, so do not keep every file in memory.
+		r.Data, r.Entries = nil, nil
 		results = append(results, r)
 	}
 

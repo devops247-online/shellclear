@@ -90,6 +90,33 @@ PSReadLine `PSReadLine/History.cs`.
   `\r\n` on Windows). Reader: a line ending in a backtick continues. `Raw` keeps
   `\r\n`, `Command` has `\r` stripped and a backtick+newline turned into `\n`.
 
+### AI assistant histories (`json`)
+
+Checked against files written by Claude Code and Codex CLI (September 2026).
+The Gemini CLI and Qwen Code paths follow their documented
+`~/.gemini/tmp/<project hash>/` layout and were not checked against real files.
+
+- Claude Code and Codex write JSON Lines: one `JSON.stringify` / `serde_json`
+  object per line, `\n` terminated, appended while a session runs. Gemini CLI and
+  Qwen Code write pretty-printed JSON (`JSON.stringify(x, null, 2)`).
+- JSON escapes control characters, so a string literal never spans lines in
+  either layout. The codec therefore works line by line: each line is one
+  entry, and its `Command` is the decoded text of every string value on the line
+  joined with `\n`. Keys are not part of `Command`. A line whose quotes do not
+  balance, or that has no string value, is opaque.
+- Editable spans are the bytes between the quotes of string values. The
+  canonical encoding escapes only `"`, `\` and control characters (`\n`, `\r`,
+  `\t`, `\b`, `\f`, otherwise `\u00xx`), which is what both writers produce.
+  Text written with other escapes (`\u0041`, `\/`) is only edited when the
+  literal replacement decodes as expected (I7). A line that was valid JSON
+  must still be valid JSON after the edit.
+- `Time` comes from a `timestamp` or `ts` member at depth 0 or 1 of the line:
+  RFC 3339 text, or Unix seconds or milliseconds.
+- Transcripts are large (gigabytes in total, single records of megabytes), so
+  `scan` splits work by bytes as well as by entry count, `find` drops file
+  content after scanning, and `clear` keeps at most 256 MiB of plans in memory
+  and plans the rest again right before writing.
+
 ### Original shellclear (rusty-ferris-club, v0.4.8)
 
 - 39 patterns, fields `name`, `test`, `secret_group`, `id`.
@@ -448,7 +475,7 @@ Locking, as implemented:
 | Area | Tests |
 |------|-------|
 | Codecs | golden round-trips in `testdata/`, `FuzzParse<Shell>` for I1, `FuzzReplace<Shell>` for I7, a fish edit that keeps `paths:` |
-| Detect | fake `Env`: `$HISTFILE`, `~/.zsh_sessions`, XDG, duplicates via symlink |
+| Detect | fake `Env`: `$HISTFILE`, `~/.zsh_sessions`, XDG, duplicates via symlink, AI assistant layouts and `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` |
 | Rules | ported suites (`internal/rules/testdata/original/`), new suites, negatives |
 | Cleaner | unchanged inode/mtime, symlink kept, mode kept, concurrent append, concurrent rewrite |
 | State | double stash refused, pop keeps new commands, backup name collision, path traversal |
