@@ -1,0 +1,87 @@
+name: Cut release
+
+# Computes the next version from Conventional Commits with svu (see .svu.yml),
+# tags main and runs the release workflow for that tag.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump: auto follows the commit messages (fix = patch, feat = minor)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+env:
+  SVU_VERSION: v3.4.1
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # push the tag
+      actions: read    # check the CI result of the commit
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: releases are cut from main only
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run this workflow on main (current ref: ${GITHUB_REF})."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: CI must be green for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json conclusion --jq '.[0].conclusion // ""')
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI for ${GITHUB_SHA::7} is '${conclusion:-not run}', not 'success'."
+            exit 1
+          fi
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: compute the version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          go install "github.com/caarlos0/svu/v3@${SVU_VERSION}"
+          svu="$(go env GOPATH)/bin/svu"
+          current=$("$svu" current)
+          if [ "$BUMP" = auto ]; then next=$("$svu" next); else next=$("$svu" "$BUMP"); fi
+          if [ "$next" = "$current" ] && git rev-parse -q --verify "refs/tags/$current" >/dev/null; then
+            echo "::error::No fix or feat commits since $current; choose patch, minor or major to release anyway."
+            exit 1
+          fi
+          echo "current $current, next $next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+      - name: create the tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "shellclear $TAG"
+          git push origin "$TAG"
+          echo "### Tagged $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    secrets: inherit

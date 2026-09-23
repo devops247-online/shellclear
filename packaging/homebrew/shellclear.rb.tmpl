@@ -12,7 +12,7 @@ class Shellclear < Formula
 
   def install
     ldflags = "-s -w -X main.version=#{version} -X main.commit=homebrew"
-    system "go", "build", *std_go_args(ldflags: ldflags), "./cmd/shellclear"
+    system "go", "build", *std_go_args(ldflags:), "./cmd/shellclear"
   end
 
   def caveats

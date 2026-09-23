@@ -40,6 +40,52 @@ jobs:
       - name: build
         run: go build -trimpath -o /dev/null ./cmd/shellclear
 
+  coverage-badge:
+    # Publishes the total coverage to the "badges" branch on every push to
+    # main; README.md reads it through a shields.io endpoint badge.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # push to the badges branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: measure coverage
+        id: cov
+        run: |
+          go test -coverprofile=cover.out ./... > /dev/null
+          pct=$(go tool cover -func=cover.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          color=$(awk -v p="$pct" 'BEGIN { print (p >= 90) ? "brightgreen" : (p >= 80) ? "green" : (p >= 70) ? "yellow" : "red" }')
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+          echo "color=$color" >> "$GITHUB_OUTPUT"
+          echo "coverage: ${pct}% (${color})"
+      - name: publish the badge
+        env:
+          PCT: ${{ steps.cov.outputs.pct }}
+          COLOR: ${{ steps.cov.outputs.color }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin badges >/dev/null; then
+            git fetch --depth 1 origin badges
+            git worktree add ../badges FETCH_HEAD
+            git -C ../badges switch -c badges
+          else
+            git worktree add --orphan -b badges ../badges
+          fi
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$PCT" "$COLOR" > ../badges/coverage.json
+          cd ../badges
+          git add coverage.json
+          if git diff --cached --quiet; then
+            echo "coverage unchanged"
+            exit 0
+          fi
+          git commit -m "coverage ${PCT}% for ${GITHUB_SHA::7}"
+          git push origin badges
+
   lint:
     runs-on: ubuntu-latest
     steps:

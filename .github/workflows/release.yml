@@ -1,11 +1,22 @@
 name: Release
 
+# Runs for a pushed v* tag, or is called by the "Cut release" workflow with the
+# tag it created (a tag pushed with GITHUB_TOKEN does not trigger workflows).
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release, for example v0.1.0
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   security:
@@ -17,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
@@ -33,6 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.TAG }}
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -46,48 +60,69 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ env.TAG }}
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
 
-  homebrew:
+  formula:
+    # Build and test the Homebrew formula from the tagged source on macOS
+    # before it is published. Stable releases only (no "-rc" tags).
     needs: goreleaser
-    # Stable releases only; tags such as v0.2.0-rc.1 are skipped.
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
+    runs-on: macos-latest
     steps:
-      - name: check the tap token
-        id: token
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          if [ -n "$TAP_TOKEN" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap is not updated."
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.token.outputs.present == 'true'
+        with:
+          ref: ${{ env.TAG }}
       - name: render the formula
-        if: steps.token.outputs.present == 'true'
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
           url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
           curl -fsSL --retry 5 "$url" -o source.tar.gz
-          sha=$(sha256sum source.tar.gz | cut -d' ' -f1)
+          sha=$(shasum -a 256 source.tar.gz | cut -d' ' -f1)
           sed -e "s|@URL@|$url|" -e "s|@SHA256@|$sha|" packaging/homebrew/shellclear.rb.tmpl > shellclear.rb
-          ruby -c shellclear.rb
+      - name: install, test and audit
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew tap-new --no-git local/shellclear-test
+          cp shellclear.rb "$(brew --repository)/Library/Taps/local/homebrew-shellclear-test/Formula/shellclear.rb"
+          brew install --build-from-source local/shellclear-test/shellclear
+          brew test local/shellclear-test/shellclear
+          brew audit --strict local/shellclear-test/shellclear
+          shellclear --version
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: homebrew-formula
+          path: shellclear.rb
+
+  publish-formula:
+    needs: formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: check the tap deploy key
+        id: key
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [ -n "$DEPLOY_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::HOMEBREW_TAP_DEPLOY_KEY is not set; the Homebrew tap is not updated."
+          fi
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: homebrew-formula
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.token.outputs.present == 'true'
+        if: steps.key.outputs.present == 'true'
         with:
           repository: devops247-online/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           path: tap
       - name: publish the formula
-        if: steps.token.outputs.present == 'true'
-        env:
-          TAG: ${{ github.ref_name }}
+        if: steps.key.outputs.present == 'true'
         run: |
           mkdir -p tap/Formula
           cp shellclear.rb tap/Formula/shellclear.rb

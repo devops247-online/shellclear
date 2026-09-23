@@ -1,6 +1,7 @@
 # shellclear
 
 [![CI](https://github.com/devops247-online/shellclear/actions/workflows/ci.yml/badge.svg)](https://github.com/devops247-online/shellclear/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdevops247-online%2Fshellclear%2Fbadges%2Fcoverage.json)](https://github.com/devops247-online/shellclear/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/devops247-online/shellclear)](https://github.com/devops247-online/shellclear/releases)
 [![License](https://img.shields.io/github/license/devops247-online/shellclear)](LICENSE)
 
@@ -373,9 +374,30 @@ Run `make hooks` once after cloning. It installs a [pre-commit](https://pre-comm
 hook that runs Trivy and blocks the commit when Trivy reports a finding. CI runs the full
 set of checks.
 
-Releases are cut by pushing a `vX.Y.Z` tag. GoReleaser builds the artifacts, the release
-workflow attests them and updates the Homebrew formula in
-[devops247-online/homebrew-tap](https://github.com/devops247-online/homebrew-tap).
+### Releasing
+
+Versions follow [SemVer](https://semver.org/) and come from the commit messages
+([Conventional Commits](https://www.conventionalcommits.org/)):
+
+| Commits since the last release | Next version before 1.0 | After 1.0 |
+|---|---|---|
+| `fix:` only | patch | patch |
+| at least one `feat:` | minor | minor |
+| `feat!:`, `fix!:` or `BREAKING CHANGE:` | minor | major |
+| only `docs:`, `test:`, `ci:`, `chore:` | no release | no release |
+
+To release, run the **Cut release** workflow on `main` from the Actions tab, or run
+`gh workflow run cut-release.yml`. It accepts `auto` (the default), `patch`, `minor` or
+`major`. The workflow checks that CI passed for the commit and computes the version with
+[svu](https://github.com/caarlos0/svu). It then tags the commit and runs the release:
+
+1. security checks (blocking);
+2. GoReleaser: archives, checksums, changelog and build provenance attestations;
+3. the Homebrew formula is built from the tagged source, tested and audited on macOS;
+4. the formula is published to
+   [devops247-online/homebrew-tap](https://github.com/devops247-online/homebrew-tap).
+
+Pushing a `vX.Y.Z` tag by hand runs the same release.
 
 Scanning 100,000 history records with all rules takes about 26 ms on an Apple M4 Max.
 
