@@ -417,6 +417,10 @@ Release ──▶ security gates ──▶ tests ──▶ GoReleaser + provenan
 
 ### On every pull request and push to `main`
 
+`main` accepts changes only through pull requests, and a pull request can be merged
+only when every job below has passed, except the informational scans. Force pushes
+and deleting `main` are blocked, with no bypass for administrators.
+
 | Job | What it checks |
 |---|---|
 | `test` | `go vet` and `go test -race` on Linux and macOS, with Go 1.22 and the latest stable Go. Coverage of `internal/` must stay at 80% or more, and the binary must build. |
