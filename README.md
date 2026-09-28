@@ -392,8 +392,44 @@ make security   # supply-chain and vulnerability checks, in parallel
 make snapshot   # build all release artifacts into dist/ without publishing
 ```
 
-`make security` runs `scripts/security-scan.sh`, which CI also runs, one job per check.
-The release workflow runs the blocking checks before it builds anything:
+Run `make hooks` once after cloning. It installs a [pre-commit](https://pre-commit.com)
+hook that runs Trivy and blocks the commit when Trivy reports a finding.
+
+Scanning 100,000 history records with all rules takes about 26 ms on an Apple M4 Max.
+
+The project uses only the Go standard library plus `gopkg.in/yaml.v3`. Commit messages
+follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+## CI/CD and security
+
+Every change goes through the same checks three times: on the developer's machine, on
+the pull request, and again on the release tag before anything is built.
+
+```
+commit ──▶ pre-commit: Trivy
+  │
+pull request / push to main ──▶ CI: tests · lint · fuzz · security scans · release dry run
+  │
+Cut release ──▶ CI green for this commit? ──▶ tag vX.Y.Z
+  │
+Release ──▶ security gates ──▶ tests ──▶ GoReleaser + provenance ──▶ brew install/test/audit ──▶ tap
+```
+
+### On every pull request and push to `main`
+
+| Job | What it checks |
+|---|---|
+| `test` | `go vet` and `go test -race` on Linux and macOS, with Go 1.22 and the latest stable Go. Coverage of `internal/` must stay at 80% or more, and the binary must build. |
+| `lint` | [golangci-lint](https://golangci-lint.run). |
+| `fuzz` | 30 seconds of fuzzing for every history format: zsh, bash, fish, PowerShell and JSON parsers, and the writers. Failing inputs are kept as artifacts. |
+| `security` | The six checks below, one job each, in parallel. |
+| `release-dry-run` | A full GoReleaser build of every archive, and the Homebrew formula is rendered and checked. |
+
+The coverage badge is published from `main` after the tests pass.
+
+### Security checks
+
+`scripts/security-scan.sh` runs them, both in CI and with `make security`:
 
 | Check | Role |
 |---|---|
@@ -404,11 +440,23 @@ The release workflow runs the blocking checks before it builds anything:
 | [osv-scanner](https://github.com/google/osv-scanner) | Informational. Every known vulnerability in `go.mod`. |
 | [capslock](https://github.com/google/capslock) | Informational. What the code can do. `shellclear` needs file and system-state access, but no network and no process execution. |
 
-Scanner versions are pinned in the script.
+A gate fails the job. The scanner versions are pinned in the script, and every run
+downloads the current vulnerability databases, so a scan checks the code against
+vulnerabilities published up to that day.
 
-Run `make hooks` once after cloning. It installs a [pre-commit](https://pre-commit.com)
-hook that runs Trivy and blocks the commit when Trivy reports a finding. CI runs the full
-set of checks.
+### Supply chain
+
+- Every third-party GitHub Action is pinned to a full commit SHA.
+- Workflows get a read-only token. Only the jobs that need more ask for it: pushing
+  the tag, creating the release, writing build provenance, and the coverage badge.
+- Go-based scanners are installed with `go install`, so their sources are checked
+  against the Go checksum database. Trivy is a prebuilt release checked against a
+  pinned sha256.
+- [Dependabot](https://docs.github.com/code-security/dependabot) proposes updates of
+  Go modules and GitHub Actions every week.
+- Release archives come with `checksums.txt` and a signed build provenance
+  attestation. Verify a download with
+  `gh attestation verify <archive> --repo devops247-online/shellclear`.
 
 ### Releasing
 
@@ -424,21 +472,20 @@ Versions follow [SemVer](https://semver.org/) and come from the commit messages
 
 To release, run the **Cut release** workflow on `main` from the Actions tab, or run
 `gh workflow run cut-release.yml`. It accepts `auto` (the default), `patch`, `minor` or
-`major`. The workflow checks that CI passed for the commit and computes the version with
-[svu](https://github.com/caarlos0/svu). It then tags the commit and runs the release:
+`major`. The workflow refuses to run unless CI passed for the commit, computes the
+version with [svu](https://github.com/caarlos0/svu), tags the commit and runs the
+release:
 
-1. security checks (blocking);
-2. GoReleaser: archives, checksums, changelog and build provenance attestations;
-3. the Homebrew formula is built from the tagged source, tested and audited on macOS;
-4. the formula is published to
+1. the four security gates run again on the tag, and nothing is built until they pass;
+2. the tests run again with `-race`;
+3. GoReleaser builds the archives, checksums and changelog, and the build provenance
+   is attested;
+4. the Homebrew formula is built from the tagged source, installed, tested and audited
+   with `brew audit --strict` on macOS;
+5. only then is the formula published to
    [devops247-online/homebrew-tap](https://github.com/devops247-online/homebrew-tap).
 
 Pushing a `vX.Y.Z` tag by hand runs the same release.
-
-Scanning 100,000 history records with all rules takes about 26 ms on an Apple M4 Max.
-
-The project uses only the Go standard library plus `gopkg.in/yaml.v3`. Commit messages
-follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## Acknowledgements
 
