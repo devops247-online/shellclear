@@ -6,7 +6,7 @@
 
 - name: "header only"
   test: "ssh-add - <<< \"-----BEGIN RSA PRIVATE KEY-----\""
-  expected: "-----BEGIN RSA PRIVATE KEY-----"
+  expected: ""
 
 - name: "public key"
   test: "echo \"-----BEGIN PUBLIC KEY-----\""
@@ -14,4 +14,32 @@
 
 - name: "certificate"
   test: "echo \"-----BEGIN CERTIFICATE-----\""
+  expected: ""
+
+- name: "printf with literal newlines"
+  test: "printf '-----BEGIN OPENSSH PRIVATE KEY-----\\nb3BlbnNzaC1rZXktdjEAAAAA\\n-----END OPENSSH PRIVATE KEY-----\\n' > id"
+  expected: "-----BEGIN OPENSSH PRIVATE KEY-----\\nb3BlbnNzaC1rZXktdjEAAAAA\\n-----END OPENSSH PRIVATE KEY-----"
+
+- name: "encrypted with PEM headers"
+  test: "cat > k.pem <<EOF\n-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,{{A*32}}\n\n{{Q*64}}\n{{Q*20}}==\n-----END RSA PRIVATE KEY-----\nEOF"
+  expected: "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,{{A*32}}\n\n{{Q*64}}\n{{Q*20}}==\n-----END RSA PRIVATE KEY-----"
+
+- name: "truncated, no END line"
+  test: "-----BEGIN PRIVATE KEY-----\n{{Q*64}}\n{{Q*64}}\n{{Q*12}}"
+  expected: "-----BEGIN PRIVATE KEY-----\n{{Q*64}}\n{{Q*64}}\n{{Q*12}}"
+
+- name: "text after the END line is not part of the key"
+  test: "-----BEGIN EC PRIVATE KEY-----\n{{Q*64}}\n-----END EC PRIVATE KEY-----\nsaved to key.pem"
+  expected: "-----BEGIN EC PRIVATE KEY-----\n{{Q*64}}\n-----END EC PRIVATE KEY-----"
+
+- name: "header followed by other output"
+  test: "first line: -----BEGIN OPENSSH PRIVATE KEY-----\ntotal lines: 7"
+  expected: ""
+
+- name: "header quoted in prose"
+  test: "the field holds a valid key, `-----BEGIN OPENSSH PRIVATE KEY-----`, 7 lines long"
+  expected: ""
+
+- name: "header and END far apart in prose"
+  test: "it starts with -----BEGIN OPENSSH PRIVATE KEY----- and, after the body, ends with -----END OPENSSH PRIVATE KEY-----."
   expected: ""
