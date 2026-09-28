@@ -419,9 +419,14 @@
   severity: high
   keywords: [.atlasv1.]
 
+# A PEM block: the header, then either only base64 and PEM headers up to the
+# END line, or a truncated body of at least one full base64 line. A header on
+# its own, such as "first line: -----BEGIN ... PRIVATE KEY-----" in a chat
+# transcript, holds no key and is not a match. Lines may be separated by
+# literal "\n", as in printf and echo -e.
 - id: private_key
   name: Private Key (PEM)
-  test: '-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----[\s\S]*?(?:-----END[ A-Z0-9_-]*PRIVATE KEY-----|$)'
+  test: '-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----(?:(?:(?:\s|\\[rn])+(?:[A-Za-z-]+:[^\r\n\\]*|[A-Za-z0-9+/]+={0,2}))*(?:\s|\\[rn])*-----END[ A-Z0-9_-]*PRIVATE KEY-----|(?:(?:\s|\\[rn])+[A-Za-z-]+:[^\r\n\\]*)*(?:\s|\\[rn])+[A-Za-z0-9+/]{40,}={0,2}(?:(?:\s|\\[rn])+[A-Za-z0-9+/]{4,}={0,2})*)'
   secret_group: 0
   severity: high
   keywords: [private key-----]
