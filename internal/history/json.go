@@ -31,6 +31,7 @@ func (jsonCodec) Shell() Shell { return JSON }
 
 func (jsonCodec) Parse(data []byte) []Entry {
 	entries := make([]Entry, 0, maxRecords(data))
+	var scratch []byte // reused by jsonCommand from line to line
 	it := lineIter{data: data}
 	line := 1
 	for {
@@ -41,7 +42,9 @@ func (jsonCodec) Parse(data []byte) []Entry {
 		raw := l[:len(l):len(l)]
 		e := Entry{Raw: raw, Line: line, Opaque: true}
 		if toks, ok := jsonTokens(trimEOL(raw)); ok {
-			if cmd, n := jsonCommand(raw, toks); n > 0 {
+			var cmd string
+			var n int
+			if cmd, n, scratch = jsonCommand(raw, toks, scratch[:0]); n > 0 {
 				e.Command, e.Opaque = cmd, false
 				e.Time = jsonTime(raw, toks)
 			}
@@ -103,8 +106,7 @@ func appendJSONSpan(dst, b []byte) []byte {
 // appendJSONUnquote decodes the body of a JSON string literal exactly like
 // json.Unmarshal into a string: the same escapes are accepted, invalid UTF-8
 // and unpaired surrogates become U+FFFD, and it fails where Unmarshal reports
-// a syntax error. It avoids Unmarshal's reflection and second validation
-// pass, which were the main cost of parsing AI session transcripts.
+// a syntax error. It decodes in one pass, without reflection.
 // FuzzJSONUnquote compares the two.
 func appendJSONUnquote(dst, b []byte) ([]byte, bool) {
 	for i := 0; i < len(b); {
@@ -226,21 +228,20 @@ func jsonTokens(line []byte) ([]jsonToken, bool) {
 }
 
 // jsonCommand joins the decoded string values of a line and returns how many
-// there were.
-func jsonCommand(raw []byte, toks []jsonToken) (string, int) {
-	var b []byte
+// there were. It builds the text in buf and returns buf for reuse.
+func jsonCommand(raw []byte, toks []jsonToken, buf []byte) (string, int, []byte) {
 	n := 0
 	for _, t := range toks {
 		if t.key {
 			continue
 		}
 		if n > 0 {
-			b = append(b, '\n')
+			buf = append(buf, '\n')
 		}
-		b = appendJSONSpan(b, raw[t.start:t.end])
+		buf = appendJSONSpan(buf, raw[t.start:t.end])
 		n++
 	}
-	return string(b), n
+	return string(buf), n, buf
 }
 
 // jsonTime reads the first "timestamp" or "ts" member at depth 0 or 1.

@@ -25,10 +25,15 @@ func bashIsTimestamp(line []byte) bool {
 }
 
 func (c bashCodec) Parse(data []byte) []Entry {
-	entries := make([]Entry, 0, maxRecords(data))
 	it := lineIter{data: data}
 	first, _ := (&lineIter{data: data}).next()
 	grouped := bashIsTimestamp(first)
+	// With timestamps a record is at least two lines.
+	n := maxRecords(data)
+	if grouped {
+		n = n/2 + 1
+	}
+	entries := make([]Entry, 0, n)
 
 	curStart, curLine := -1, 1
 	curTS, curContent := false, false
