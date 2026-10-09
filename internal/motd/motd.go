@@ -163,7 +163,8 @@ const (
 
 // countFile checks one file against its cache entry e (nil when there is
 // none) and returns the count and the new cache entry (nil on a cache hit).
-// The bytes it reads are taken from mem while it holds them.
+// It takes the file's size from mem while it reads, which covers both a full
+// and an incremental read.
 func (c *Checker) countFile(f history.File, e *cacheEntry, mem *scan.Budget) (int, method, *cacheEntry, error) {
 	fi, err := os.Stat(f.RealPath)
 	if err != nil {

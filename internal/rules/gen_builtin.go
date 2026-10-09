@@ -1,10 +1,9 @@
 //go:build ignore
 
 // gen_builtin writes builtin_rules.go from patterns.yaml, so the binary does
-// not parse YAML at start-up: `motd` runs in every new shell, and decoding
-// the built-in rules was most of its own run time. Run `go generate
-// ./internal/rules` after editing patterns.yaml; TestBuiltinMatchesYAML fails
-// until the two agree.
+// not parse YAML at start-up, which `motd` would pay in every new shell. Run
+// `go generate ./internal/rules` after editing patterns.yaml;
+// TestBuiltinMatchesYAML fails until the two agree.
 package main
 
 import (
