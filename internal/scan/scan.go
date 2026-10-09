@@ -6,7 +6,6 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -145,7 +144,7 @@ func (s *Scanner) scanRange(entries []history.Entry, out [][]rules.Match, start,
 		if e.Opaque || e.Command == "" {
 			continue
 		}
-		ms := s.Rules.FindWithLower(e.Command, strings.ToLower(e.Command))
+		ms := s.Rules.Find(e.Command)
 		if len(ms) == 0 || s.allowed(e.Command) {
 			continue
 		}

@@ -2,19 +2,20 @@
 package rules
 
 import (
-	_ "embed"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed patterns.yaml
-var builtinYAML []byte
+//go:generate go run gen_builtin.go
 
 // BuiltinSource is the Source of rules compiled into the binary.
 const BuiltinSource = "builtin"
@@ -64,8 +65,33 @@ type Rule struct {
 	Keywords    []string // lower-cased
 	Source      string   // BuiltinSource or a file path
 
-	re *regexp.Regexp
+	c *compiledRule // shared by copies of the rule
 }
+
+// compiledRule holds the regex and its search plan. Built-in rules compile on
+// first use: a clean history never needs most of them, and `motd` runs at
+// every shell start-up. Custom rules compile at load time so that errors are
+// reported where the rule is defined.
+type compiledRule struct {
+	once     sync.Once
+	expr     string
+	keywords []string
+	re       *regexp.Regexp
+	plan     searchPlan
+}
+
+func (c *compiledRule) get() *compiledRule {
+	c.once.Do(func() {
+		if c.re == nil {
+			// Built-in patterns are compiled and validated by tests.
+			c.re = regexp.MustCompile(c.expr)
+		}
+		c.plan = newSearchPlan(c.expr, c.keywords)
+	})
+	return c
+}
+
+func (r *Rule) regexp() *regexp.Regexp { return r.c.get().re }
 
 // Match is one secret found in a command.
 type Match struct {
@@ -86,9 +112,23 @@ type ruleYAML struct {
 
 var idRe = regexp.MustCompile(`^[a-z0-9_]+$`)
 
-// Builtin returns the rules compiled into the binary.
+// Builtin returns the rules compiled into the binary. They come from
+// patterns.yaml through builtin_rules.go, which go generate keeps in sync.
 func Builtin() ([]Rule, error) {
-	return Load(strings.NewReader(string(builtinYAML)), BuiltinSource)
+	out := make([]Rule, 0, len(builtinRules))
+	seen := make(map[string]bool, len(builtinRules))
+	for _, y := range builtinRules {
+		r, err := compile(y, BuiltinSource)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", BuiltinSource, err)
+		}
+		if seen[r.ID] {
+			return nil, fmt.Errorf("%s: rule %q: duplicate id", BuiltinSource, r.ID)
+		}
+		seen[r.ID] = true
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // Load reads a list of rules in YAML. Errors name the source, the line and
@@ -161,12 +201,15 @@ func compile(y ruleYAML, source string) (Rule, error) {
 	if strings.TrimSpace(y.Test) == "" {
 		return Rule{}, fmt.Errorf("rule %q: test is empty", label)
 	}
-	re, err := regexp.Compile(y.Test)
-	if err != nil {
-		return Rule{}, fmt.Errorf("rule %q: invalid regex: %w", label, err)
-	}
-	if y.SecretGroup < 0 || y.SecretGroup > re.NumSubexp() {
-		return Rule{}, fmt.Errorf("rule %q: secret_group %d but the regex has %d groups", label, y.SecretGroup, re.NumSubexp())
+	var re *regexp.Regexp
+	if source != BuiltinSource {
+		var err error
+		if re, err = regexp.Compile(y.Test); err != nil {
+			return Rule{}, fmt.Errorf("rule %q: invalid regex: %w", label, err)
+		}
+		if y.SecretGroup < 0 || y.SecretGroup > re.NumSubexp() {
+			return Rule{}, fmt.Errorf("rule %q: secret_group %d but the regex has %d groups", label, y.SecretGroup, re.NumSubexp())
+		}
 	}
 	sev, err := ParseSeverity(y.Severity)
 	if err != nil {
@@ -184,7 +227,8 @@ func compile(y ruleYAML, source string) (Rule, error) {
 	}
 	return Rule{
 		ID: id, Name: name, Test: y.Test, SecretGroup: y.SecretGroup,
-		Severity: sev, Keywords: kws, Source: source, re: re,
+		Severity: sev, Keywords: kws, Source: source,
+		c: &compiledRule{expr: y.Test, keywords: kws, re: re},
 	}, nil
 }
 
@@ -207,6 +251,13 @@ func idFromName(name string) string {
 // Set is an ordered collection of rules ready for matching.
 type Set struct {
 	rules []*Rule
+
+	once sync.Once
+	// km finds every keyword of every rule in one pass; nil when a keyword
+	// is not ASCII, and then each rule checks its keywords on its own.
+	km      *keywordMatcher
+	kwRules [][]int32 // keyword index -> indexes of the rules that use it
+	ruleKWs [][]int32 // rule index -> its keyword indexes
 }
 
 // NewSet combines rule lists in order. A later rule with an existing id
@@ -221,7 +272,7 @@ func NewSet(ignore []string, lists ...[]Rule) (*Set, error) {
 	for _, list := range lists {
 		for i := range list {
 			r := list[i]
-			if r.re == nil {
+			if r.c == nil {
 				return nil, fmt.Errorf("rule %q is not compiled", r.ID)
 			}
 			if at, ok := index[r.ID]; ok {
@@ -253,31 +304,115 @@ type candidate struct {
 // Find returns all secrets in cmd, sorted by position. Overlapping matches
 // from different rules are merged into one range credited to the most severe
 // rule (the earlier rule on a tie). Matches that fail ValidSecret are dropped.
+//
+// A rule runs only when strings.ToLower(cmd) contains one of its keywords.
+// All keywords are found in one pass, and where the rule's regex allows it,
+// the regex runs only on the parts of cmd around a keyword (see searchPlan).
+// The result is always the same as running every applicable regex over the
+// whole command.
 func (s *Set) Find(cmd string) []Match {
-	return s.find(cmd, strings.ToLower(cmd))
+	s.once.Do(s.prepare)
+	if s.km == nil || len(cmd) > math.MaxInt32 {
+		return s.findPlain(cmd)
+	}
+	sc := getScratch(len(s.rules))
+	defer putScratch(sc)
+
+	var high bool
+	sc.hits, high = s.km.scan(cmd, sc.hits[:0])
+	if high && hasFoldExotic(cmd) {
+		return s.findPlain(cmd)
+	}
+	for _, h := range sc.hits {
+		for _, ri := range s.kwRules[h.kw] {
+			sc.mark[ri] = sc.epoch
+		}
+	}
+
+	var cands []candidate
+	for i, r := range s.rules {
+		if len(r.Keywords) > 0 && sc.mark[i] != sc.epoch {
+			continue
+		}
+		c := r.c.get()
+		if c.plan.segment {
+			cands = s.findSegments(cmd, i, c, sc, cands)
+		} else if c.plan.satisfies(cmd) {
+			cands = appendMatches(cands, cmd, 0, len(cmd), r, c.re, i)
+		}
+	}
+	return s.merge(cmd, cands)
 }
 
-// FindWithLower is Find for callers that already hold the lower-cased command.
-func (s *Set) FindWithLower(cmd, lower string) []Match { return s.find(cmd, lower) }
-
-func (s *Set) find(cmd, lower string) []Match {
+// findPlain is Find without the shared keyword pass: each rule checks its
+// keywords in the lower-cased command and runs over the whole command.
+func (s *Set) findPlain(cmd string) []Match {
+	lower := strings.ToLower(cmd)
 	var cands []candidate
 	for i, r := range s.rules {
 		if !r.applies(lower) {
 			continue
 		}
-		for _, m := range r.re.FindAllStringSubmatchIndex(cmd, -1) {
-			start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
-			if start < 0 || end <= start {
-				continue
-			}
-			start, end = trimQuotes(cmd, start, end)
-			if !ValidSecret(cmd[start:end]) {
-				continue
-			}
-			cands = append(cands, candidate{start, end, i})
+		cands = appendMatches(cands, cmd, 0, len(cmd), r, r.regexp(), i)
+	}
+	return s.merge(cmd, cands)
+}
+
+// findSegments runs rule ri only on the stretches of cmd between stop bytes
+// that contain one of its keywords. No match can cross a stop byte and every
+// match contains a keyword, so no match is lost; stop bytes are not word
+// characters, so \b sees the same thing at a stretch's edge as in cmd.
+func (s *Set) findSegments(cmd string, ri int, c *compiledRule, sc *scratch, cands []candidate) []candidate {
+	sc.spans = sc.spans[:0]
+	kws := s.ruleKWs[ri]
+	for _, h := range sc.hits {
+		if slices.Contains(kws, h.kw) {
+			end := int(h.end)
+			sc.spans = append(sc.spans, span{end - s.km.lens[h.kw], end})
 		}
 	}
+	slices.SortFunc(sc.spans, func(a, b span) int { return a.start - b.start })
+
+	stop := &c.plan.stop
+	pos := 0 // cmd[:pos] has been searched or holds no keyword
+	for _, sp := range sc.spans {
+		if sp.end <= pos {
+			continue
+		}
+		a := max(sp.start, pos)
+		for a > pos && !stop[cmd[a-1]] {
+			a--
+		}
+		b := sp.end
+		for b < len(cmd) && !stop[cmd[b]] {
+			b++
+		}
+		if c.plan.satisfies(cmd[a:b]) {
+			cands = appendMatches(cands, cmd, a, b, s.rules[ri], c.re, ri)
+		}
+		pos = b
+	}
+	return cands
+}
+
+// appendMatches runs re over cmd[from:to] and appends the valid secrets.
+func appendMatches(cands []candidate, cmd string, from, to int, r *Rule, re *regexp.Regexp, rank int) []candidate {
+	for _, m := range re.FindAllStringSubmatchIndex(cmd[from:to], -1) {
+		start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
+		if start < 0 || end <= start {
+			continue
+		}
+		start, end = trimQuotes(cmd, from+start, from+end)
+		if !ValidSecret(cmd[start:end]) {
+			continue
+		}
+		cands = append(cands, candidate{start, end, rank})
+	}
+	return cands
+}
+
+// merge sorts candidates and merges overlapping ones.
+func (s *Set) merge(cmd string, cands []candidate) []Match {
 	if len(cands) == 0 {
 		return nil
 	}
@@ -304,6 +439,88 @@ func (s *Set) find(cmd, lower string) []Match {
 		cur = c
 	}
 	return append(out, s.match(cmd, cur))
+}
+
+// prepare builds the shared keyword matcher on first use.
+func (s *Set) prepare() {
+	index := map[string]int32{}
+	var keywords []string
+	s.ruleKWs = make([][]int32, len(s.rules))
+	for i, r := range s.rules {
+		for _, k := range r.Keywords {
+			if !isASCII(k) {
+				return // keep km nil: Find uses findPlain
+			}
+			ki, ok := index[k]
+			if !ok {
+				ki = int32(len(keywords))
+				index[k] = ki
+				keywords = append(keywords, k)
+				s.kwRules = append(s.kwRules, nil)
+			}
+			if !slices.Contains(s.ruleKWs[i], ki) {
+				s.ruleKWs[i] = append(s.ruleKWs[i], ki)
+				s.kwRules[ki] = append(s.kwRules[ki], int32(i))
+			}
+		}
+	}
+	s.km = newKeywordMatcher(keywords)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// hasFoldExotic reports whether s contains a rune that strings.ToLower or a
+// case-insensitive regex maps to an ASCII letter although it is not ASCII:
+// U+0130 (İ, lower-cases to i), U+017F (ſ, folds to s) and U+212A (Kelvin
+// sign, lower-cases and folds to k). Commands with one of them take the plain
+// path, where nothing depends on ASCII folding. TestFoldExotic keeps this list
+// in sync with the unicode tables.
+func hasFoldExotic(s string) bool {
+	return strings.Contains(s, "\u0130") || strings.Contains(s, "\u017f") || strings.Contains(s, "\u212a")
+}
+
+// span is a half-open byte range [start, end).
+type span struct{ start, end int }
+
+// scratch is per-call working memory for Find.
+type scratch struct {
+	hits  []kwHit
+	spans []span
+	mark  []uint32 // rule index -> epoch in which a keyword of it was seen
+	epoch uint32
+}
+
+var scratchPool = sync.Pool{New: func() any { return new(scratch) }}
+
+func getScratch(nrules int) *scratch {
+	sc := scratchPool.Get().(*scratch)
+	if len(sc.mark) < nrules {
+		sc.mark = make([]uint32, nrules)
+		sc.epoch = 0
+	}
+	sc.epoch++
+	if sc.epoch == 0 {
+		clear(sc.mark)
+		sc.epoch = 1
+	}
+	return sc
+}
+
+func putScratch(sc *scratch) {
+	if cap(sc.hits) > 1<<16 {
+		sc.hits = nil
+	}
+	if cap(sc.spans) > 1<<16 {
+		sc.spans = nil
+	}
+	scratchPool.Put(sc)
 }
 
 func (s *Set) better(a, b int) bool {
@@ -333,7 +550,7 @@ func (r *Rule) applies(lower string) bool {
 // MatchRule runs a single rule without merging; used by tests and `rules`.
 func (r *Rule) MatchRule(cmd string) []string {
 	var out []string
-	for _, m := range r.re.FindAllStringSubmatchIndex(cmd, -1) {
+	for _, m := range r.regexp().FindAllStringSubmatchIndex(cmd, -1) {
 		start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
 		if start < 0 || end <= start {
 			continue

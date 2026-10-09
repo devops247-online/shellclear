@@ -391,11 +391,11 @@ func TestIDFromName(t *testing.T) {
 	}
 }
 
-func TestFindWithLowerMatchesFind(t *testing.T) {
+func TestFindMatchesPlainPath(t *testing.T) {
 	set := builtinSet(t)
 	cmd := "export GITHUB_TOKEN=ghp_" + strings.Repeat("Z", 36)
-	a, b := set.Find(cmd), set.FindWithLower(cmd, strings.ToLower(cmd))
+	a, b := set.Find(cmd), set.findPlain(cmd)
 	if len(a) != 1 || len(b) != 1 || a[0] != b[0] {
-		t.Fatalf("Find %+v != FindWithLower %+v", a, b)
+		t.Fatalf("Find %+v != findPlain %+v", a, b)
 	}
 }
