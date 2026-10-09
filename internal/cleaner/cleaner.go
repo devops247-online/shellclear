@@ -97,6 +97,11 @@ func (c *Cleaner) edit(codec history.Codec, entries []history.Entry, findings []
 		byEntry[f.Entry] = f
 	}
 	var out bytes.Buffer
+	size := 0
+	for _, e := range entries {
+		size += len(e.Raw)
+	}
+	out.Grow(size)
 	var changes []Change
 	var skipped []scan.Finding
 	for i, e := range entries {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -261,5 +262,24 @@ func TestBannerOnlyOnTerminalText(t *testing.T) {
 		if strings.Contains(ta.stdout.String(), logo) {
 			t.Fatalf("%v: banner printed", args)
 		}
+	}
+}
+
+// BenchmarkMotdCached is `motd` in a new shell when the history has not
+// changed: the cost every shell start-up pays.
+func BenchmarkMotdCached(b *testing.B) {
+	t := &testing.T{}
+	ta := newTestApp(t)
+	var hist strings.Builder
+	for i := 0; i < 50000; i++ {
+		fmt.Fprintf(&hist, ": %d:0;git commit -m \"change %d\"\n", 1700000000+i, i)
+	}
+	ta.write(t, ".zsh_history", hist.String())
+	ta.vars["SHELL"] = "/bin/zsh"
+	ta.Run([]string{"motd"})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ta.stdout.Reset()
+		ta.Run([]string{"motd"})
 	}
 }

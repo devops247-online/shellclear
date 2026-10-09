@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -335,12 +336,18 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 	}
 
 	opt := output.Options{Color: a.colorOn(g), Fancy: a.StdoutIsTTY, Location: a.Location, Home: a.Env.Home}
+	// One write per line was one system call per line; the report is
+	// complete before it is printed, so buffer all of it.
+	out := bufio.NewWriterSize(a.Stdout, 64<<10)
 	if f == output.Text && a.StdoutIsTTY && !g.noBanner {
-		if err := output.Banner(a.Stdout, version, opt.Color); err != nil {
+		if err := output.Banner(out, version, opt.Color); err != nil {
 			return exitError, err
 		}
 	}
-	if err := output.Write(a.Stdout, f, results, opt); err != nil {
+	if err := output.Write(out, f, results, opt); err != nil {
+		return exitError, err
+	}
+	if err := out.Flush(); err != nil {
 		return exitError, err
 	}
 	if output.Summarize(results).Commands > 0 {
