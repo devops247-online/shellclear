@@ -218,5 +218,9 @@ func eolLen(b []byte) int {
 	return 0
 }
 
+// maxRecords is an upper bound for the number of records in data for formats
+// where every record ends with a newline, so a parser allocates once.
+func maxRecords(data []byte) int { return countLines(data) + 1 }
+
 // countLines returns the number of '\n' bytes in b.
 func countLines(b []byte) int { return bytes.Count(b, []byte("\n")) }

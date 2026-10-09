@@ -25,7 +25,7 @@ func bashIsTimestamp(line []byte) bool {
 }
 
 func (c bashCodec) Parse(data []byte) []Entry {
-	var entries []Entry
+	entries := make([]Entry, 0, maxRecords(data))
 	it := lineIter{data: data}
 	first, _ := (&lineIter{data: data}).next()
 	grouped := bashIsTimestamp(first)

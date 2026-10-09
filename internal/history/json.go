@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
-	"strings"
 	"time"
+	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // jsonCodec handles the chat histories and session transcripts that AI coding
@@ -28,7 +30,7 @@ type jsonCodec struct{}
 func (jsonCodec) Shell() Shell { return JSON }
 
 func (jsonCodec) Parse(data []byte) []Entry {
-	var entries []Entry
+	entries := make([]Entry, 0, maxRecords(data))
 	it := lineIter{data: data}
 	line := 1
 	for {
@@ -82,17 +84,103 @@ func (jsonCodec) spans(raw []byte) []span {
 }
 
 func (jsonCodec) decodeSpan(b []byte) string {
+	return string(appendJSONSpan(nil, b))
+}
+
+// appendJSONSpan appends the decoded text of a string literal's body, as
+// json.Unmarshal would decode it; broken escapes are kept literally so the
+// text is still scanned.
+func appendJSONSpan(dst, b []byte) []byte {
 	if bytes.IndexByte(b, '\\') < 0 {
-		return string(b)
+		return append(dst, b...)
 	}
-	quoted := make([]byte, 0, len(b)+2)
-	quoted = append(append(append(quoted, '"'), b...), '"')
-	var s string
-	if err := json.Unmarshal(quoted, &s); err != nil {
-		// Keep broken escapes literally so the text is still scanned.
-		return string(b)
+	if out, ok := appendJSONUnquote(dst, b); ok {
+		return out
 	}
-	return s
+	return append(dst, b...)
+}
+
+// appendJSONUnquote decodes the body of a JSON string literal exactly like
+// json.Unmarshal into a string: the same escapes are accepted, invalid UTF-8
+// and unpaired surrogates become U+FFFD, and it fails where Unmarshal reports
+// a syntax error. It avoids Unmarshal's reflection and second validation
+// pass, which were the main cost of parsing AI session transcripts.
+// FuzzJSONUnquote compares the two.
+func appendJSONUnquote(dst, b []byte) ([]byte, bool) {
+	for i := 0; i < len(b); {
+		c := b[i]
+		switch {
+		case c == '\\':
+			if i+1 >= len(b) {
+				return nil, false
+			}
+			switch b[i+1] {
+			case '"', '\\', '/':
+				dst = append(dst, b[i+1])
+			case 'b':
+				dst = append(dst, '\b')
+			case 'f':
+				dst = append(dst, '\f')
+			case 'n':
+				dst = append(dst, '\n')
+			case 'r':
+				dst = append(dst, '\r')
+			case 't':
+				dst = append(dst, '\t')
+			case 'u':
+				r := jsonU4(b[i:])
+				if r < 0 {
+					return nil, false
+				}
+				i += 6
+				if utf16.IsSurrogate(r) {
+					if dec := utf16.DecodeRune(r, jsonU4(b[i:])); dec != unicode.ReplacementChar {
+						dst = utf8.AppendRune(dst, dec)
+						i += 6
+						continue
+					}
+					r = unicode.ReplacementChar
+				}
+				dst = utf8.AppendRune(dst, r)
+				continue
+			default:
+				return nil, false
+			}
+			i += 2
+		case c < ' ' || c == '"':
+			return nil, false
+		case c < utf8.RuneSelf:
+			dst = append(dst, c)
+			i++
+		default:
+			r, size := utf8.DecodeRune(b[i:])
+			dst = utf8.AppendRune(dst, r)
+			i += size
+		}
+	}
+	return dst, true
+}
+
+// jsonU4 decodes \uXXXX at the start of b, or returns -1.
+func jsonU4(b []byte) rune {
+	if len(b) < 6 || b[0] != '\\' || b[1] != 'u' {
+		return -1
+	}
+	var r rune
+	for _, c := range b[2:6] {
+		switch {
+		case '0' <= c && c <= '9':
+			c -= '0'
+		case 'a' <= c && c <= 'f':
+			c = c - 'a' + 10
+		case 'A' <= c && c <= 'F':
+			c = c - 'A' + 10
+		default:
+			return -1
+		}
+		r = r*16 + rune(c)
+	}
+	return r
 }
 
 func (jsonCodec) encodeSpan(s string) []byte { return jsonEscape(s) }
@@ -140,19 +228,19 @@ func jsonTokens(line []byte) ([]jsonToken, bool) {
 // jsonCommand joins the decoded string values of a line and returns how many
 // there were.
 func jsonCommand(raw []byte, toks []jsonToken) (string, int) {
-	var b strings.Builder
+	var b []byte
 	n := 0
 	for _, t := range toks {
 		if t.key {
 			continue
 		}
 		if n > 0 {
-			b.WriteByte('\n')
+			b = append(b, '\n')
 		}
-		b.WriteString(jsonCodec{}.decodeSpan(raw[t.start:t.end]))
+		b = appendJSONSpan(b, raw[t.start:t.end])
 		n++
 	}
-	return b.String(), n
+	return string(b), n
 }
 
 // jsonTime reads the first "timestamp" or "ts" member at depth 0 or 1.

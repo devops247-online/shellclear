@@ -28,7 +28,7 @@ func zshIsMeta(b byte) bool { return b == 0 || (b >= 0x83 && b <= 0xA2) }
 func (zshCodec) Shell() Shell { return Zsh }
 
 func (c zshCodec) Parse(data []byte) []Entry {
-	var entries []Entry
+	entries := make([]Entry, 0, maxRecords(data))
 	it := lineIter{data: data}
 	line := 1
 	for {
