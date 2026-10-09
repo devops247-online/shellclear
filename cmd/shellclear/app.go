@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devops247-online/shellclear/internal/config"
@@ -317,22 +318,28 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 
 	sc := &scan.Scanner{Rules: set, Allow: cfg.Allow}
 	results := make([]scan.Result, len(files))
-	took := make([]time.Duration, len(files))
 	entries := make([]int, len(files))
-	started := time.Now()
+	// Files finish in any order; --verbose reports them in file order, each
+	// as soon as every file before it is done.
+	var mu sync.Mutex
+	finished := make([]bool, len(files))
+	reported := 0
 	err = sc.ScanFiles(files, func(i int, r scan.Result) {
 		r.Findings = scan.FilterSeverity(r.Findings, minSev)
-		took[i], entries[i] = time.Since(started), len(r.Entries)
+		entries[i] = len(r.Entries)
 		// Only findings are reported. AI transcripts can add up to
 		// gigabytes, so do not keep every file in memory.
 		r.Data, r.Entries = nil, nil
-		results[i] = r
+		mu.Lock()
+		defer mu.Unlock()
+		results[i], finished[i] = r, true
+		for ; reported < len(files) && finished[reported]; reported++ {
+			res := results[reported]
+			a.verbosef(g, "scanned %s: %d entries, %d findings in %s", files[reported].Path, entries[reported], len(res.Findings), res.Elapsed.Round(time.Millisecond))
+		}
 	})
 	if err != nil {
 		return exitError, err
-	}
-	for i, hf := range files {
-		a.verbosef(g, "scanned %s: %d entries, %d findings (done at %s)", hf.Path, entries[i], len(results[i].Findings), took[i].Round(time.Millisecond))
 	}
 
 	opt := output.Options{Color: a.colorOn(g), Fancy: a.StdoutIsTTY, Location: a.Location, Home: a.Env.Home}

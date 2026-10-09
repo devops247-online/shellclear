@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,20 +87,28 @@ func (c *Checker) Count(files []history.File) (int, Stats, error) {
 	results := make([]result, len(files))
 	mem := scan.NewBudget(scan.MaxInFlightBytes)
 	var next atomic.Int64
+	var failed atomic.Int64 // first failing position in unique; later ones are skipped
+	failed.Store(int64(len(unique)))
 	var wg sync.WaitGroup
-	for w := min(runtime.NumCPU(), len(unique)); w > 0; w-- {
+	for w := min(c.Scanner.Parallelism(), len(unique)); w > 0; w-- {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for {
 				k := int(next.Add(1) - 1)
-				if k >= len(unique) {
+				if k >= len(unique) || int64(k) > failed.Load() {
 					return
 				}
 				i := unique[k]
 				var r result
 				r.n, r.how, r.entry, r.err = c.countFile(files[i], cache.Files[files[i].RealPath], mem)
 				results[i] = r
+				for r.err != nil {
+					cur := failed.Load()
+					if int64(k) >= cur || failed.CompareAndSwap(cur, int64(k)) {
+						break
+					}
+				}
 			}
 		}()
 	}

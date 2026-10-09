@@ -26,7 +26,7 @@ type testApp struct {
 	vars           map[string]string
 }
 
-func newTestApp(t *testing.T) *testApp {
+func newTestApp(t testing.TB) *testApp {
 	t.Helper()
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -47,7 +47,7 @@ func newTestApp(t *testing.T) *testApp {
 	return ta
 }
 
-func (ta *testApp) write(t *testing.T, rel, content string) string {
+func (ta *testApp) write(t testing.TB, rel, content string) string {
 	t.Helper()
 	p := filepath.Join(ta.home, rel)
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
@@ -268,15 +268,16 @@ func TestBannerOnlyOnTerminalText(t *testing.T) {
 // BenchmarkMotdCached is `motd` in a new shell when the history has not
 // changed: the cost every shell start-up pays.
 func BenchmarkMotdCached(b *testing.B) {
-	t := &testing.T{}
-	ta := newTestApp(t)
+	ta := newTestApp(b)
 	var hist strings.Builder
 	for i := 0; i < 50000; i++ {
 		fmt.Fprintf(&hist, ": %d:0;git commit -m \"change %d\"\n", 1700000000+i, i)
 	}
-	ta.write(t, ".zsh_history", hist.String())
+	ta.write(b, ".zsh_history", hist.String())
 	ta.vars["SHELL"] = "/bin/zsh"
-	ta.Run([]string{"motd"})
+	if code := ta.Run([]string{"motd"}); code != exitOK {
+		b.Fatalf("motd exited with %d: %s", code, ta.stderr)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ta.stdout.Reset()

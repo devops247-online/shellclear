@@ -48,6 +48,7 @@ type Result struct {
 	Data     []byte
 	Entries  []history.Entry
 	Findings []Finding
+	Elapsed  time.Duration // reading and scanning, for ScanFile and ScanFiles
 }
 
 // Scanner finds secrets in history files.
@@ -59,17 +60,22 @@ type Scanner struct {
 
 // ScanFile reads and scans one history file.
 func (s *Scanner) ScanFile(f history.File) (Result, error) {
+	start := time.Now()
 	data, err := os.ReadFile(f.RealPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", f.Path, err)
 	}
-	return s.ScanBytes(f, data)
+	r, err := s.ScanBytes(f, data)
+	r.Elapsed = time.Since(start)
+	return r, err
 }
 
-// MaxInFlightBytes bounds how much file data is held at once when files are
-// read concurrently. AI transcripts can add up to gigabytes; a file larger
-// than this is handled on its own.
-const MaxInFlightBytes = 256 << 20
+// MaxInFlightBytes bounds how many bytes of files are being scanned at once
+// when files are read concurrently. Parsed entries and decoded commands take
+// several times the file size again, so this keeps peak memory near what
+// scanning one large file needs. AI transcripts can add up to gigabytes; a
+// file larger than this is scanned on its own.
+const MaxInFlightBytes = 64 << 20
 
 // ScanFiles reads and scans files, up to Workers files at a time and up to
 // MaxInFlightBytes of them, and calls done with each result as soon as it is
@@ -103,6 +109,11 @@ func (s *Scanner) ScanFiles(files []history.File, done func(i int, r Result)) er
 					size = fi.Size()
 				}
 				size = mem.Acquire(size)
+				if int64(i) > stopAt.Load() {
+					// An earlier file failed while this one waited.
+					mem.Release(size)
+					return
+				}
 				r, err := s.ScanFile(files[i])
 				if err == nil {
 					done(i, r)
@@ -165,6 +176,10 @@ func (b *Budget) Release(n int64) {
 	b.mu.Unlock()
 	b.cond.Broadcast()
 }
+
+// Parallelism is the number of files, or of chunks of one file, that are
+// scanned at once: Workers, or runtime.NumCPU() when Workers is not set.
+func (s *Scanner) Parallelism() int { return s.workers() }
 
 func (s *Scanner) workers() int {
 	if s.Workers <= 0 {
