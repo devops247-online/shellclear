@@ -263,6 +263,9 @@ func TestEquivalenceCustomRules(t *testing.T) {
 - {id: text_end, test: 'tail=(\w{4,})\z', secret_group: 1, keywords: [tail]}
 - {id: text_begin, test: '\Ahead=(\w{4,})', secret_group: 1, keywords: [head]}
 - {id: whitespace_inside, test: 'user\s+(\w{4,})', secret_group: 1, keywords: [user]}
+- {id: inner_eq, test: '(?i)\b(\w*key[0-9]*)(?:=|\s*=\s*")([a-z0-9]{4,40})', secret_group: 2, keywords: [key]}
+- {id: inner_colon, test: '\b([A-Za-z_]+_PW)\s*:\s*(\w{4,12})\b', secret_group: 2}
+- {id: inner_anchor, test: '\b(pass)(?:=|\s+=)\s*(\w{4,20})$', secret_group: 2, keywords: [pass]}
 `
 	rs, err := Load(strings.NewReader(custom), "custom.yaml")
 	if err != nil {
@@ -282,6 +285,7 @@ func TestEquivalenceCustomRules(t *testing.T) {
 		"export ", "pass: ", "begin", "end", "tok", "token=", "toKen=", "ticket ", "ABC12345", "QQ123456", "key", "pw", "xpw", "1234",
 		"id=", "x y", "Secret", "secret", "SECRET", "ſecret", "K", "K", "auth", "deadbeef0123", "alpha", "BETA_", "x=", "yy=",
 		"abab", "ababab", "c=", "tail=", "head=", "user", "\n", " ", "Пароль=", "пароль", "word", "=",
+		"apikey", "KEY1", "key9=", " = \"", "DB_PW", ":", " : ", "pass", "pass =", "x_", "\t",
 	}, corpusPieces[:40]...)
 	rng := rand.New(rand.NewSource(11))
 	for name, set := range sets {
@@ -345,5 +349,39 @@ func TestContainsFold(t *testing.T) {
 		if got, want := containsFold(text, lit), strings.Contains(asciiFold(text), lit); got != want {
 			t.Fatalf("containsFold(%q, %q) = %v, want %v", text, lit, got, want)
 		}
+	}
+}
+
+// TestEquivalenceInnerPlan stresses the inner-literal plan of
+// generic_secret_assignment: assignments with and without keywords,
+// whitespace around "=", quotes, words that run into each other, and the
+// inputs that would make a naive candidate loop quadratic.
+func TestEquivalenceInnerPlan(t *testing.T) {
+	set := builtinSet(t)
+	pieces := []string{
+		"TOKEN", "token", "My_Secret_Key2", "api_key", "APIKEY", "x", "word", "_", "9", "PASSWD", "mysql_pwd", "PGPASSWORD", "access_key",
+		"=", "=", " = ", "  =", "= ", "\t=\t", "\n=\n", "'", "\"", "=\"", "='", "s3cr3tval", "v", ";", "|", " ", "\n", "-", ".", "$x", "ſ", "K",
+	}
+	rng := rand.New(rand.NewSource(13))
+	n := 100000
+	if testing.Short() || raceEnabled {
+		n = 10000
+	}
+	for i := 0; i < n; i++ {
+		var b strings.Builder
+		for j := rng.Intn(16); j >= 0; j-- {
+			b.WriteString(pieces[rng.Intn(len(pieces))])
+		}
+		checkEquivalent(t, set, b.String())
+	}
+	for _, s := range []string{
+		strings.Repeat("TOKEN ", 3000) + "=",
+		strings.Repeat("a_token=", 2000),
+		strings.Repeat("token =", 2000),
+		strings.Repeat("x=", 5000),
+		strings.Repeat("token=\"", 2000),
+		"password" + strings.Repeat(" ", 5000) + "=" + strings.Repeat(" ", 5000) + "'v4lue'",
+	} {
+		checkEquivalent(t, set, s)
 	}
 }

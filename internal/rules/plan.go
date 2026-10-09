@@ -28,6 +28,9 @@ type searchPlan struct {
 	// required lists sets of literals; every match contains at least one
 	// literal of every set. A text that lacks one of the sets is skipped.
 	required [][]string
+	// inner, when set, finds the matches through a literal inside the
+	// regex instead (see innerPlan); it takes precedence over segment.
+	inner *innerPlan
 }
 
 // Limits that keep the analysis cheap and the literal checks fast.
@@ -51,6 +54,9 @@ func newSearchPlan(expr string, keywords []string) searchPlan {
 	}
 	an := &analyzer{info: map[*syntax.Regexp]litInfo{}, proven: map[*syntax.Regexp]bool{}, keywords: keywords}
 	p.required = pickRequired(an.analyze(re).reqs)
+	if p.inner = newInnerPlan(re, expr, an); p.inner != nil {
+		return p
+	}
 	if len(keywords) == 0 || !an.proves(re) {
 		return p
 	}
@@ -376,10 +382,13 @@ func minLen(set []string) int {
 // pickRequired keeps the few most selective required sets that are cheap to
 // check. Sets with a literal that stands for a non-ASCII rune are dropped:
 // nonASCIIMark is a placeholder, not text that can be searched for.
-func pickRequired(reqs [][]string) [][]string {
+func pickRequired(reqs [][]string) [][]string { return pickRequiredMax(reqs, maxReqSet) }
+
+// pickRequiredMax is pickRequired with a limit on the literals per set.
+func pickRequiredMax(reqs [][]string, maxSet int) [][]string {
 	var cands [][]string
 	for _, r := range reqs {
-		if len(r) > maxReqSet {
+		if len(r) > maxSet {
 			continue
 		}
 		searchable := true

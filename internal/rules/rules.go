@@ -335,9 +335,12 @@ func (s *Set) Find(cmd string) []Match {
 			continue
 		}
 		c := r.c.get()
-		if c.plan.segment {
+		switch {
+		case c.plan.inner != nil:
+			cands = c.plan.inner.find(cands, cmd, r, i)
+		case c.plan.segment:
 			cands = s.findSegments(cmd, i, c, sc, cands)
-		} else if c.plan.satisfies(cmd) {
+		case c.plan.satisfies(cmd):
 			cands = appendMatches(cands, cmd, 0, len(cmd), r, c.re, i)
 		}
 	}
@@ -398,17 +401,30 @@ func (s *Set) findSegments(cmd string, ri int, c *compiledRule, sc *scratch, can
 // appendMatches runs re over cmd[from:to] and appends the valid secrets.
 func appendMatches(cands []candidate, cmd string, from, to int, r *Rule, re *regexp.Regexp, rank int) []candidate {
 	for _, m := range re.FindAllStringSubmatchIndex(cmd[from:to], -1) {
-		start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
-		if start < 0 || end <= start {
-			continue
+		if from != 0 {
+			for k := range m {
+				if m[k] >= 0 {
+					m[k] += from
+				}
+			}
 		}
-		start, end = trimQuotes(cmd, from+start, from+end)
-		if !ValidSecret(cmd[start:end]) {
-			continue
-		}
-		cands = append(cands, candidate{start, end, rank})
+		cands = appendMatch(cands, cmd, m, r, rank)
 	}
 	return cands
+}
+
+// appendMatch appends the secret of one match, given as submatch indexes in
+// cmd, when it is valid.
+func appendMatch(cands []candidate, cmd string, m []int, r *Rule, rank int) []candidate {
+	start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
+	if start < 0 || end <= start {
+		return cands
+	}
+	start, end = trimQuotes(cmd, start, end)
+	if !ValidSecret(cmd[start:end]) {
+		return cands
+	}
+	return append(cands, candidate{start, end, rank})
 }
 
 // merge sorts candidates and merges overlapping ones.
