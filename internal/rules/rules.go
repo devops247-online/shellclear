@@ -321,6 +321,7 @@ type candidate struct {
 // whole command.
 func (s *Set) Find(cmd string) []Match {
 	s.once.Do(s.prepare)
+	// kwHit offsets are int32.
 	if s.km == nil || len(cmd) > math.MaxInt32 {
 		return s.findPlain(cmd)
 	}
@@ -364,7 +365,13 @@ func (s *Set) Find(cmd string) []Match {
 			cands = c.plan.inner.find(cands, cmd, r, i)
 		case c.plan.segment:
 			cands = s.findSegments(cmd, i, c, sc, cands)
-		case c.plan.satisfies(cmd):
+		case !c.plan.satisfies(cmd):
+		case c.plan.prefix != nil:
+			var ok bool
+			if cands, ok = c.plan.prefix.find(cands, cmd, r, i); !ok {
+				cands = appendMatches(cands, cmd, 0, len(cmd), r, c.re, i)
+			}
+		default:
 			cands = appendMatches(cands, cmd, 0, len(cmd), r, c.re, i)
 		}
 	}

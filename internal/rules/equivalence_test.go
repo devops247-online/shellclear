@@ -394,3 +394,76 @@ func TestEquivalenceInnerPlan(t *testing.T) {
 		checkEquivalent(t, set, s)
 	}
 }
+
+func TestFoldFinder(t *testing.T) {
+	rng := rand.New(rand.NewSource(17))
+	alpha := "cuCUrl -;"
+	for round := 0; round < 20000; round++ {
+		text := randString(rng, alpha, rng.Intn(40))
+		lit := strings.ToLower(randString(rng, "curl-", 1+rng.Intn(3)))
+		f := newFoldFinder(lit)
+		folded := asciiFold(text)
+		for from := 0; from <= len(text); from += 1 + rng.Intn(3) {
+			want := -1
+			if i := strings.Index(folded[from:], lit); i >= 0 {
+				want = from + i
+			}
+			if got := f.next(text, from); got != want {
+				t.Fatalf("next(%q, %q, %d) = %d, want %d", text, lit, from, got, want)
+			}
+		}
+	}
+}
+
+// TestEquivalencePrefixPlan stresses the prefix plans: commands dense in
+// the literals that begin curl, mysql, registry and netrc matches, the lazy
+// gap's stop bytes, and custom rules of the same shapes.
+func TestEquivalencePrefixPlan(t *testing.T) {
+	if raceEnabled {
+		t.Skip("single goroutine; CI runs it without -race in the coverage step")
+	}
+	const custom = `
+- {id: lazy_ci, test: '(?i)\bdeploy\s+key\b[^;é]*?\s--pw[= ]([^\s;]{4,})', secret_group: 1, keywords: [deploy]}
+- {id: lazy_case, test: '\bTool\b[^|]*?\s-k\s+(\S{4,})', secret_group: 1, keywords: [tool]}
+- {id: alt_heads, test: '\b(?:git|hg)\s+(?:push|pull)\b[^;]*?\s(?:--token|-t)=(\w{4,})', secret_group: 1, keywords: [push, pull]}
+- {id: no_gap, test: '\bvault\s+login\s+(\S{4,})', secret_group: 1, keywords: [vault]}
+`
+	rs, err := Load(strings.NewReader(custom), "custom.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtin := builtinSet(t)
+	both, _ := NewSet(nil, mustBuiltin(t), rs)
+	pieces := []string{
+		"curl", "curl ", "CURL ", "xcurl", "curl_", " -u ", " --user ", "-u", "=", "user:pw", "a:b", ":", "mysql ", "mysqldump", "MYSQL ", " -p", "-pS3cret",
+		"docker login ", "helm  registry login", "podman", " login", "--password ", "-p ", "machine ", "Default ", "login ", "password ", "\\n", "x",
+		";", "|", "&", " ", "\t", "\n", "'", "\"", "`", "é", "ſ", "\xff", "deploy key ", "Deploy  KEY", " --pw=", "Tool ", "tool ", " -k ", "git push ",
+		"hg pull", " --token=", " -t=", "vault login ", "abcd1234",
+	}
+	rng := rand.New(rand.NewSource(19))
+	n := 100000
+	if testing.Short() {
+		n = 10000
+	}
+	for i := 0; i < n; i++ {
+		var b strings.Builder
+		for j := rng.Intn(20); j >= 0; j-- {
+			b.WriteString(pieces[rng.Intn(len(pieces))])
+		}
+		cmd := b.String()
+		checkEquivalent(t, builtin, cmd)
+		checkEquivalent(t, both, cmd)
+	}
+	for _, s := range []string{
+		strings.Repeat("curl x ", 3000),
+		"curl -u " + strings.Repeat("curl;", 3000),
+		strings.Repeat("curl -u a;", 3000),
+		strings.Repeat("curl -u x ", 3000),
+		strings.Repeat("default value ", 3000) + "machine h login u password p4ss",
+		strings.Repeat("mysql -h db ", 2000) + "-pS3cret",
+		strings.Repeat("docker login registry ", 2000) + "--password s3cret",
+	} {
+		checkEquivalent(t, builtin, s)
+		checkEquivalent(t, both, s)
+	}
+}

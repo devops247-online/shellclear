@@ -31,6 +31,9 @@ type searchPlan struct {
 	// inner, when set, finds the matches through a literal inside the
 	// regex instead (see innerPlan); it takes precedence over segment.
 	inner *innerPlan
+	// prefix, when set, runs the regex only where one of the literals that
+	// begin every match occurs (see prefixPlan); used when segment is not.
+	prefix *prefixPlan
 }
 
 // Limits that keep the analysis cheap and the literal checks fast.
@@ -60,16 +63,17 @@ func newSearchPlan(expr string, keywords []string) searchPlan {
 	if p.inner = newInnerPlan(re, expr, an); p.inner != nil {
 		return p
 	}
-	if len(keywords) == 0 || !an.proves(re) {
-		return p
+	if len(keywords) > 0 && an.proves(re) {
+		for b := 0; b < utf8.RuneSelf; b++ {
+			p.stop[b] = !syntax.IsWordChar(rune(b))
+		}
+		if markConsumed(re, &p.stop) {
+			p.segment = slices.Contains(p.stop[:utf8.RuneSelf], true)
+		}
 	}
-	for b := 0; b < utf8.RuneSelf; b++ {
-		p.stop[b] = !syntax.IsWordChar(rune(b))
+	if !p.segment {
+		p.prefix = newPrefixPlan(re, expr, an)
 	}
-	if !markConsumed(re, &p.stop) {
-		return p
-	}
-	p.segment = slices.Contains(p.stop[:utf8.RuneSelf], true)
 	return p
 }
 

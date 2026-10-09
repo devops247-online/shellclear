@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"regexp"
 	"regexp/syntax"
 	"strings"
 	"unicode"
@@ -26,7 +25,7 @@ import (
 // has exactly one possible match start: walking back from i over whitespace
 // to j and over word bytes to s, \b allows no start inside the word. The
 // regex is run anchored at s only, with the true left context (see
-// anchoredAt), and the candidates come in increasing order, which replays
+// anchored), and the candidates come in increasing order, which replays
 // FindAll's leftmost-first, non-overlapping scan exactly. NAME's required
 // literals filter the candidates first.
 //
@@ -35,9 +34,7 @@ import (
 type innerPlan struct {
 	lit     byte
 	nameReq [][]string
-	// ctx is `\A(?s:.)(?:expr)` and anc0 `\A(?:expr)`: expr anchored at a
-	// position, after one rune of context or at the start of the text.
-	ctx, anc0 *regexp.Regexp
+	full    anchored
 }
 
 // maxInnerTail bounds the non-whitespace bytes a match may cover after lit,
@@ -60,7 +57,7 @@ func newInnerPlan(re *syntax.Regexp, expr string, an *analyzer) *innerPlan {
 		return nil
 	}
 	for b := 0; b < 256; b++ {
-		if nameBytes[b] && !(b < utf8.RuneSelf && syntax.IsWordChar(rune(b))) {
+		if nameBytes[b] && (b >= utf8.RuneSelf || !syntax.IsWordChar(rune(b))) {
 			return nil
 		}
 	}
@@ -87,15 +84,11 @@ func newInnerPlan(re *syntax.Regexp, expr string, an *analyzer) *innerPlan {
 		return nil
 	}
 
-	ctx, err := regexp.Compile(`\A(?s:.)(?:` + expr + `)`)
-	if err != nil {
+	full, ok := newAnchored(expr)
+	if !ok {
 		return nil
 	}
-	anc0, err := regexp.Compile(`\A(?:` + expr + `)`)
-	if err != nil {
-		return nil
-	}
-	return &innerPlan{lit: byte(lit), nameReq: pickRequiredMax(an.analyze(name).reqs, maxNameReqSet), ctx: ctx, anc0: anc0}
+	return &innerPlan{lit: byte(lit), nameReq: pickRequiredMax(an.analyze(name).reqs, maxNameReqSet), full: full}
 }
 
 func unwrapCapture(re *syntax.Regexp) *syntax.Regexp {
@@ -155,7 +148,7 @@ func isSpaceClass(re *syntax.Regexp) bool {
 		return false
 	}
 	for b := 0; b < 256; b++ {
-		if set[b] && !(b < utf8.RuneSelf && isGoSpace(byte(b))) {
+		if set[b] && (b >= utf8.RuneSelf || !isGoSpace(byte(b))) {
 			return false
 		}
 	}
@@ -355,7 +348,7 @@ func (p *innerPlan) find(cands []candidate, cmd string, r *Rule, rank int) []can
 		if !satisfiesAll(cmd[s:j], p.nameReq) {
 			continue
 		}
-		m := p.anchoredAt(cmd, s)
+		m := p.full.at(cmd, s)
 		if m == nil {
 			continue
 		}
@@ -364,29 +357,6 @@ func (p *innerPlan) find(cands []candidate, cmd string, r *Rule, rank int) []can
 		scan = max(scan, from)
 	}
 	return cands
-}
-
-// anchoredAt runs the regex anchored at s and returns the submatch indexes
-// in cmd, or nil. s must be at an ASCII byte. Go's regexp has no API to
-// start at an offset with the text before it as context, so the context
-// rune is matched by (?s:.): assertions such as \b and ^ then see exactly
-// the rune they would see in the whole text.
-func (p *innerPlan) anchoredAt(cmd string, s int) []int {
-	if s == 0 {
-		return p.anc0.FindStringSubmatchIndex(cmd)
-	}
-	_, w := utf8.DecodeLastRuneInString(cmd[:s])
-	m := p.ctx.FindStringSubmatchIndex(cmd[s-w:])
-	if m == nil {
-		return nil
-	}
-	m[0] += w
-	for i := range m {
-		if m[i] >= 0 {
-			m[i] += s - w
-		}
-	}
-	return m
 }
 
 func satisfiesAll(text string, required [][]string) bool {
