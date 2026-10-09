@@ -40,8 +40,11 @@ const (
 	maxClassSize = 16 // characters in an enumerated character class
 	maxReqSet    = 8  // literals per required set
 	maxReqSets   = 3  // required sets checked per text
-	nonASCIIMark = "\x80"
 )
+
+// nonASCIIMark stands for any non-ASCII rune in an enumerated string. It
+// never occurs in a keyword, and required sets that contain it are dropped.
+const nonASCIIMark = "\x80"
 
 // newSearchPlan analyses a regex that compiled with regexp.Compile.
 // keywords are the rule's lower-case ASCII keywords. The parsed tree is used
@@ -66,9 +69,7 @@ func newSearchPlan(expr string, keywords []string) searchPlan {
 	if !markConsumed(re, &p.stop) {
 		return p
 	}
-	for b := 0; b < utf8.RuneSelf; b++ {
-		p.segment = p.segment || p.stop[b]
-	}
+	p.segment = slices.Contains(p.stop[:utf8.RuneSelf], true)
 	return p
 }
 
@@ -128,8 +129,9 @@ type litInfo struct {
 	reqs [][]string
 }
 
-// analyzer memoises the analysis per node: Simplify expands x{1,200} into
-// 200 nested optional groups, which would otherwise be analysed over and over.
+// analyzer memoises the analysis per node: proves asks for the analysis of
+// the same subexpressions again and again, and x{1,200} would otherwise be
+// analysed once per level of the expression above it.
 type analyzer struct {
 	info     map[*syntax.Regexp]litInfo
 	proven   map[*syntax.Regexp]bool
@@ -408,25 +410,13 @@ func pickRequiredMax(reqs [][]string, maxSet int) [][]string {
 		out = append(out, b)
 		var rest [][]string
 		for _, c := range cands {
-			if !sameSet(c, b) {
+			if !slices.Equal(c, b) {
 				rest = append(rest, c)
 			}
 		}
 		cands = rest
 	}
 	return out
-}
-
-func sameSet(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // proves reports whether every match of re contains at least one of the

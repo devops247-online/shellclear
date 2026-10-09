@@ -194,10 +194,13 @@ func genCommand(rng *rand.Rand) string {
 }
 
 func TestEquivalenceGenerated(t *testing.T) {
+	if raceEnabled {
+		t.Skip("single goroutine; CI runs it without -race in the coverage step")
+	}
 	set := builtinSet(t)
 	rng := rand.New(rand.NewSource(7))
 	n := 200000
-	if testing.Short() || raceEnabled {
+	if testing.Short() {
 		n = 20000
 	}
 	for i := 0; i < n; i++ {
@@ -244,6 +247,9 @@ func TestEquivalenceSuites(t *testing.T) {
 // have: anchors, multi-line flags, any-character, empty matches, keywords
 // the regex does not contain, non-ASCII keywords and literals.
 func TestEquivalenceCustomRules(t *testing.T) {
+	if raceEnabled {
+		t.Skip("single goroutine; CI runs it without -race in the coverage step")
+	}
 	const custom = `
 - {id: anchored, test: '^export\s+(\w+)=(\S+)$', secret_group: 2, keywords: [export]}
 - {id: multiline, test: '(?m)^pass:\s*(\S+)$', secret_group: 1, keywords: [pass]}
@@ -290,7 +296,7 @@ func TestEquivalenceCustomRules(t *testing.T) {
 	rng := rand.New(rand.NewSource(11))
 	for name, set := range sets {
 		n := 50000
-		if testing.Short() || raceEnabled {
+		if testing.Short() {
 			n = 5000
 		}
 		t.Run(name, func(t *testing.T) {
@@ -357,6 +363,9 @@ func TestContainsFold(t *testing.T) {
 // whitespace around "=", quotes, words that run into each other, and the
 // inputs that would make a naive candidate loop quadratic.
 func TestEquivalenceInnerPlan(t *testing.T) {
+	if raceEnabled {
+		t.Skip("single goroutine; CI runs it without -race in the coverage step")
+	}
 	set := builtinSet(t)
 	pieces := []string{
 		"TOKEN", "token", "My_Secret_Key2", "api_key", "APIKEY", "x", "word", "_", "9", "PASSWD", "mysql_pwd", "PGPASSWORD", "access_key",
@@ -364,7 +373,7 @@ func TestEquivalenceInnerPlan(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(13))
 	n := 100000
-	if testing.Short() || raceEnabled {
+	if testing.Short() {
 		n = 10000
 	}
 	for i := 0; i < n; i++ {

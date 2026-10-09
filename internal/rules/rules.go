@@ -118,7 +118,7 @@ func Builtin() ([]Rule, error) {
 	out := make([]Rule, 0, len(builtinRules))
 	seen := make(map[string]bool, len(builtinRules))
 	for _, y := range builtinRules {
-		r, err := compile(y, BuiltinSource)
+		r, err := compileRule(y, BuiltinSource, true)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", BuiltinSource, err)
 		}
@@ -156,7 +156,7 @@ func Load(r io.Reader, source string) ([]Rule, error) {
 		if err := decodeStrict(n, &y); err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", source, n.Line, err)
 		}
-		rule, err := compile(y, source)
+		rule, err := compileRule(y, source, false)
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", source, n.Line, err)
 		}
@@ -183,7 +183,10 @@ func decodeStrict(n *yaml.Node, y *ruleYAML) error {
 	return n.Decode(y)
 }
 
-func compile(y ruleYAML, source string) (Rule, error) {
+// compileRule checks a rule and compiles its regex. With lazy set, as for
+// the built-in rules, whose regexes tests compile and check, the regex is
+// compiled on first use instead.
+func compileRule(y ruleYAML, source string, lazy bool) (Rule, error) {
 	id := strings.ToLower(strings.TrimSpace(y.ID))
 	if id == "" {
 		id = idFromName(y.Name)
@@ -202,7 +205,7 @@ func compile(y ruleYAML, source string) (Rule, error) {
 		return Rule{}, fmt.Errorf("rule %q: test is empty", label)
 	}
 	var re *regexp.Regexp
-	if source != BuiltinSource {
+	if !lazy {
 		var err error
 		if re, err = regexp.Compile(y.Test); err != nil {
 			return Rule{}, fmt.Errorf("rule %q: invalid regex: %w", label, err)
@@ -253,11 +256,17 @@ type Set struct {
 	rules []*Rule
 
 	once sync.Once
-	// km finds every keyword of every rule in one pass; nil when a keyword
-	// is not ASCII, and then each rule checks its keywords on its own.
+	// km finds every ASCII keyword of every rule in one pass. It is nil
+	// when the automaton would be too large, and Find then takes the plain
+	// path for every command.
 	km      *keywordMatcher
 	kwRules [][]int32 // keyword index -> indexes of the rules that use it
 	ruleKWs [][]int32 // rule index -> its keyword indexes
+	// plainGate marks rules with a non-ASCII keyword: they check their
+	// keywords in the lower-cased command, as the plain path does, and
+	// run over the whole command.
+	plainGate []bool
+	scratch   sync.Pool // of *scratch, working memory for Find
 }
 
 // NewSet combines rule lists in order. A later rule with an existing id
@@ -315,8 +324,8 @@ func (s *Set) Find(cmd string) []Match {
 	if s.km == nil || len(cmd) > math.MaxInt32 {
 		return s.findPlain(cmd)
 	}
-	sc := getScratch(len(s.rules))
-	defer putScratch(sc)
+	sc := s.getScratch()
+	defer s.putScratch(sc)
 
 	var high bool
 	sc.hits, high = s.km.scan(cmd, sc.hits[:0])
@@ -330,7 +339,22 @@ func (s *Set) Find(cmd string) []Match {
 	}
 
 	var cands []candidate
+	var lower string // strings.ToLower(cmd), for plainGate rules only
 	for i, r := range s.rules {
+		if s.plainGate[i] {
+			if lower == "" {
+				lower = strings.ToLower(cmd)
+			}
+			if r.applies(lower) {
+				c := r.c.get()
+				if c.plan.inner != nil {
+					cands = c.plan.inner.find(cands, cmd, r, i)
+				} else {
+					cands = appendMatches(cands, cmd, 0, len(cmd), r, c.re, i)
+				}
+			}
+			continue
+		}
 		if len(r.Keywords) > 0 && sc.mark[i] != sc.epoch {
 			continue
 		}
@@ -462,11 +486,15 @@ func (s *Set) prepare() {
 	index := map[string]int32{}
 	var keywords []string
 	s.ruleKWs = make([][]int32, len(s.rules))
+	s.plainGate = make([]bool, len(s.rules))
 	for i, r := range s.rules {
 		for _, k := range r.Keywords {
-			if !isASCII(k) {
-				return // keep km nil: Find uses findPlain
-			}
+			s.plainGate[i] = s.plainGate[i] || !isASCII(k)
+		}
+		if s.plainGate[i] {
+			continue
+		}
+		for _, k := range r.Keywords {
 			ki, ok := index[k]
 			if !ok {
 				ki = int32(len(keywords))
@@ -513,13 +541,10 @@ type scratch struct {
 	epoch uint32
 }
 
-var scratchPool = sync.Pool{New: func() any { return new(scratch) }}
-
-func getScratch(nrules int) *scratch {
-	sc := scratchPool.Get().(*scratch)
-	if len(sc.mark) < nrules {
-		sc.mark = make([]uint32, nrules)
-		sc.epoch = 0
+func (s *Set) getScratch() *scratch {
+	sc, _ := s.scratch.Get().(*scratch)
+	if sc == nil {
+		sc = &scratch{mark: make([]uint32, len(s.rules))}
 	}
 	sc.epoch++
 	if sc.epoch == 0 {
@@ -529,14 +554,14 @@ func getScratch(nrules int) *scratch {
 	return sc
 }
 
-func putScratch(sc *scratch) {
+func (s *Set) putScratch(sc *scratch) {
 	if cap(sc.hits) > 1<<16 {
 		sc.hits = nil
 	}
 	if cap(sc.spans) > 1<<16 {
 		sc.spans = nil
 	}
-	scratchPool.Put(sc)
+	s.scratch.Put(sc)
 }
 
 func (s *Set) better(a, b int) bool {

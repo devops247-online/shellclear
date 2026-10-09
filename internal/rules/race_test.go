@@ -2,6 +2,6 @@
 
 package rules
 
-// raceEnabled shrinks the generated equivalence suites: the race detector
-// makes them about ten times slower and adds nothing to them.
+// raceEnabled skips the generated equivalence suites: they run in a single
+// goroutine, so the race detector only makes them ten times slower.
 const raceEnabled = true
