@@ -315,19 +315,23 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 	}
 
 	sc := &scan.Scanner{Rules: set, Allow: cfg.Allow}
-	var results []scan.Result
-	for _, hf := range files {
-		start := time.Now()
-		r, err := sc.ScanFile(hf)
-		if err != nil {
-			return exitError, err
-		}
+	results := make([]scan.Result, len(files))
+	took := make([]time.Duration, len(files))
+	entries := make([]int, len(files))
+	started := time.Now()
+	err = sc.ScanFiles(files, func(i int, r scan.Result) {
 		r.Findings = scan.FilterSeverity(r.Findings, minSev)
-		a.verbosef(g, "scanned %s: %d entries, %d findings in %s", hf.Path, len(r.Entries), len(r.Findings), time.Since(start).Round(time.Millisecond))
+		took[i], entries[i] = time.Since(started), len(r.Entries)
 		// Only findings are reported. AI transcripts can add up to
 		// gigabytes, so do not keep every file in memory.
 		r.Data, r.Entries = nil, nil
-		results = append(results, r)
+		results[i] = r
+	})
+	if err != nil {
+		return exitError, err
+	}
+	for i, hf := range files {
+		a.verbosef(g, "scanned %s: %d entries, %d findings (done at %s)", hf.Path, entries[i], len(results[i].Findings), took[i].Round(time.Millisecond))
 	}
 
 	opt := output.Options{Color: a.colorOn(g), Fancy: a.StdoutIsTTY, Location: a.Location, Home: a.Env.Home}

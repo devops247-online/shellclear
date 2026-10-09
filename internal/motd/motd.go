@@ -15,9 +15,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/devops247-online/shellclear/internal/history"
 	"github.com/devops247-online/shellclear/internal/rules"
@@ -64,16 +67,59 @@ type Stats struct {
 func (c *Checker) Count(files []history.File) (int, Stats, error) {
 	var st Stats
 	cache := c.load()
+
+	// Files are checked concurrently; the cache is only read while they run
+	// and updated afterwards in file order, so the result does not depend on
+	// scheduling. A path listed twice is checked once.
+	type result struct {
+		n     int
+		how   method
+		entry *cacheEntry
+		err   error
+	}
+	first := map[string]int{}
+	var unique []int
+	for i, f := range files {
+		if _, dup := first[f.RealPath]; !dup {
+			first[f.RealPath] = i
+			unique = append(unique, i)
+		}
+	}
+	results := make([]result, len(files))
+	mem := scan.NewBudget(scan.MaxInFlightBytes)
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for w := min(runtime.NumCPU(), len(unique)); w > 0; w-- {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				k := int(next.Add(1) - 1)
+				if k >= len(unique) {
+					return
+				}
+				i := unique[k]
+				var r result
+				r.n, r.how, r.entry, r.err = c.countFile(files[i], cache.Files[files[i].RealPath], mem)
+				results[i] = r
+			}
+		}()
+	}
+	wg.Wait()
+
 	changed := false
 	total := 0
 	seen := map[string]bool{}
-	for _, f := range files {
-		seen[f.RealPath] = true
-		n, how, err := c.countFile(f, cache)
-		if err != nil {
-			return 0, st, err
+	for i, f := range files {
+		r := results[first[f.RealPath]]
+		if seen[f.RealPath] {
+			r.how = hit // the first listing already updated the cache
 		}
-		switch how {
+		seen[f.RealPath] = true
+		if r.err != nil {
+			return 0, st, r.err
+		}
+		switch r.how {
 		case hit:
 			st.Hits++
 		case incremental:
@@ -83,7 +129,10 @@ func (c *Checker) Count(files []history.File) (int, Stats, error) {
 			st.Full++
 			changed = true
 		}
-		total += n
+		if r.entry != nil && first[f.RealPath] == i {
+			cache.Files[f.RealPath] = r.entry
+		}
+		total += r.n
 	}
 	for p := range cache.Files {
 		if !seen[p] {
@@ -105,26 +154,29 @@ const (
 	full
 )
 
-func (c *Checker) countFile(f history.File, cache *cacheFile) (int, method, error) {
+// countFile checks one file against its cache entry e (nil when there is
+// none) and returns the count and the new cache entry (nil on a cache hit).
+// The bytes it reads are taken from mem while it holds them.
+func (c *Checker) countFile(f history.File, e *cacheEntry, mem *scan.Budget) (int, method, *cacheEntry, error) {
 	fi, err := os.Stat(f.RealPath)
 	if err != nil {
-		return 0, full, err
+		return 0, full, nil, err
 	}
 	id := fileID(fi)
-	e := cache.Files[f.RealPath]
 	if e != nil && e.Size == fi.Size() && e.MtimeNS == fi.ModTime().UnixNano() && e.FileID == id {
-		return e.Count, hit, nil
+		return e.Count, hit, nil, nil
 	}
 	codec, err := history.CodecFor(f.Shell)
 	if err != nil {
-		return 0, full, err
+		return 0, full, nil, err
 	}
 
 	fh, err := os.Open(f.RealPath)
 	if err != nil {
-		return 0, full, err
+		return 0, full, nil, err
 	}
 	defer fh.Close()
+	defer mem.Release(mem.Acquire(fi.Size()))
 
 	if e != nil && e.FileID == id && fi.Size() > e.Scanned && e.Scanned > 0 {
 		start := max(0, e.Scanned-windowSize)
@@ -135,26 +187,24 @@ func (c *Checker) countFile(f history.File, cache *cacheFile) (int, method, erro
 				tail := buf[e.Scanned-start:]
 				n, done := c.scan(codec, tail)
 				scanned := e.Scanned + done
-				cache.Files[f.RealPath] = &cacheEntry{
+				return e.Count + n, incremental, &cacheEntry{
 					Size: fi.Size(), MtimeNS: fi.ModTime().UnixNano(), FileID: id,
 					Scanned: scanned, TailHash: hashBytes(buf[max(0, scanned-windowSize-start) : scanned-start]),
 					Count: e.Count + n,
-				}
-				return e.Count + n, incremental, nil
+				}, nil
 			}
 		}
 	}
 
 	data, err := io.ReadAll(fh)
 	if err != nil {
-		return 0, full, err
+		return 0, full, nil, err
 	}
 	n, done := c.scan(codec, data)
-	cache.Files[f.RealPath] = &cacheEntry{
+	return n, full, &cacheEntry{
 		Size: fi.Size(), MtimeNS: fi.ModTime().UnixNano(), FileID: id,
 		Scanned: done, TailHash: hashBytes(data[max(0, done-windowSize):done]), Count: n,
-	}
-	return n, full, nil
+	}, nil
 }
 
 // scan counts findings in the complete records of data and returns how many
