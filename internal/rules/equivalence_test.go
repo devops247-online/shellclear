@@ -272,6 +272,8 @@ func TestEquivalenceCustomRules(t *testing.T) {
 - {id: inner_eq, test: '(?i)\b(\w*key[0-9]*)(?:=|\s*=\s*")([a-z0-9]{4,40})', secret_group: 2, keywords: [key]}
 - {id: inner_colon, test: '\b([A-Za-z_]+_PW)\s*:\s*(\w{4,12})\b', secret_group: 2}
 - {id: inner_anchor, test: '\b(pass)(?:=|\s+=)\s*(\w{4,20})$', secret_group: 2, keywords: [pass]}
+- {id: upper_class, test: '[A-Z]_KEY=(\w{4,})', secret_group: 1, keywords: ['_key=']}
+- {id: upper_class_required, test: '\b([A-Z]+)=([a-z0-9]{4,})(?:;|$)', secret_group: 2}
 `
 	rs, err := Load(strings.NewReader(custom), "custom.yaml")
 	if err != nil {
@@ -292,6 +294,7 @@ func TestEquivalenceCustomRules(t *testing.T) {
 		"id=", "x y", "Secret", "secret", "SECRET", "ſecret", "K", "K", "auth", "deadbeef0123", "alpha", "BETA_", "x=", "yy=",
 		"abab", "ababab", "c=", "tail=", "head=", "user", "\n", " ", "Пароль=", "пароль", "word", "=",
 		"apikey", "KEY1", "key9=", " = \"", "DB_PW", ":", " : ", "pass", "pass =", "x_", "\t",
+		"B_KEY=", "b_key=", "=SECRET=", "xsecret", "abcd1234", ";",
 	}, corpusPieces[:40]...)
 	rng := rand.New(rand.NewSource(11))
 	for name, set := range sets {
@@ -308,6 +311,29 @@ func TestEquivalenceCustomRules(t *testing.T) {
 				checkEquivalent(t, set, b.String())
 			}
 		})
+	}
+}
+
+// TestUpperCaseClassPlan pins a case the generated suites can miss: a
+// character class with upper-case letters must be folded without cutting
+// the class short, or the plan derives literals the text never contains.
+func TestUpperCaseClassPlan(t *testing.T) {
+	rs, err := Load(strings.NewReader(`
+- {id: upper_class, test: '[A-Z]_KEY=(\w{4,})', secret_group: 1, keywords: ['_key=']}
+- {id: upper_class_required, test: '\b([A-Z]+)=([a-z0-9]{4,})(?:;|$)', secret_group: 2}
+`), "upper.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := NewSet(nil, rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{"B_KEY=abcd1234", "export Z_KEY=wxyz9876 now", "=SECRET=xsecret", "run ABC=abcd1234;"} {
+		if got := set.Find(cmd); len(got) != 1 {
+			t.Errorf("Find(%q) = %d matches, want 1", cmd, len(got))
+		}
+		checkEquivalent(t, set, cmd)
 	}
 }
 

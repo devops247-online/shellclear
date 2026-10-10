@@ -175,11 +175,14 @@ func (an *analyzer) compute(re *syntax.Regexp) litInfo {
 				case r == 0x17F || r == 0x212A:
 					continue // absent from any text that reaches the plan
 				case r < utf8.RuneSelf:
-					if r >= 'A' && r <= 'Z' {
-						r += 'a' - 'A'
+					// Fold into a copy: changing r would end the loop
+					// early and enumerate [A-Z] as just "a".
+					c := r
+					if c >= 'A' && c <= 'Z' {
+						c += 'a' - 'A'
 					}
-					if !ascii[r] {
-						ascii[r] = true
+					if !ascii[c] {
+						ascii[c] = true
 						n++
 					}
 				case !nonASCII:
