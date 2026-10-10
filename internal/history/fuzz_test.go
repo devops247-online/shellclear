@@ -2,6 +2,7 @@ package history
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -165,4 +166,24 @@ func bashSafe(cmd string) bool {
 		}
 	}
 	return true
+}
+
+// FuzzJSONUnquote checks that the hand-written string decoder agrees with
+// encoding/json on every input: same text when Unmarshal succeeds, failure
+// when it does not.
+func FuzzJSONUnquote(f *testing.F) {
+	for _, s := range []string{`plain`, `a\nb`, `é😀`, `\ud800x`, `\ud800A`, `\udc00`, `bad\x`, `\u12`, "tab\tin", "\xff\xfe", `\/\b\f\r\t\"\\`, `end\`, `q"q`} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		got, ok := appendJSONUnquote(nil, b)
+		var want string
+		err := json.Unmarshal(append(append([]byte{'"'}, b...), '"'), &want)
+		if ok != (err == nil) {
+			t.Fatalf("%q: ok=%v but json.Unmarshal err=%v", b, ok, err)
+		}
+		if ok && string(got) != want {
+			t.Fatalf("%q: got %q, want %q", b, got, want)
+		}
+	})
 }

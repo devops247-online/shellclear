@@ -96,7 +96,14 @@ func (c *Cleaner) edit(codec history.Codec, entries []history.Entry, findings []
 	for _, f := range findings {
 		byEntry[f.Entry] = f
 	}
+	// Room for the file plus a placeholder per finding, which is usually
+	// longer than the secret it replaces.
 	var out bytes.Buffer
+	size := len(findings) * 48
+	for _, e := range entries {
+		size += len(e.Raw)
+	}
+	out.Grow(size)
 	var changes []Change
 	var skipped []scan.Finding
 	for i, e := range entries {

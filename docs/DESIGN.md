@@ -131,7 +131,7 @@ The Gemini CLI and Qwen Code paths follow their documented
 ```
 cmd/shellclear/        main: flag parsing, wiring, exit codes
 internal/history/      codecs + detect
-internal/rules/        embedded patterns, loading, Find, validation
+internal/rules/        built-in patterns, loading, Find, validation
 internal/scan/         file → findings, worker pool
 internal/cleaner/      plan edits, safe write, concurrent-append handling
 internal/state/        ~/.shellclear layout: backups, stash, cache, locking
@@ -231,7 +231,7 @@ type Rule struct {
     Severity    Severity // default Medium
     Keywords    []string // lower-cased at load time
     Source      string   // "builtin" or the file path
-    re          *regexp.Regexp
+    c           *compiledRule // regex + search plan, built on first use
 }
 
 type Match struct {
@@ -240,13 +240,13 @@ type Match struct {
     Secret     string   // raw secret; never leaves the process
 }
 
-type Set struct{ /* compiled rules, keyword index */ }
+type Set struct{ /* rules, keyword automaton built on first use */ }
 
-func Builtin() (*Set, error)
+func Builtin() ([]Rule, error)
 func Load(r io.Reader, source string) ([]Rule, error)
-func NewSet(rules []Rule, ignoreIDs []string) (*Set, error)
+func NewSet(ignoreIDs []string, lists ...[]Rule) (*Set, error)
 func (s *Set) Find(cmd string) []Match // all matches, merged, validated
-func (s *Set) Rules() []Rule
+func (s *Set) Rules() []*Rule
 func ValidSecret(s string) bool
 ```
 
@@ -255,7 +255,63 @@ func ValidSecret(s string) bool
 - `Find`: keyword prefilter on `strings.ToLower(cmd)` → `FindAllStringSubmatchIndex`
   → take the `secret_group` span → `ValidSecret` → merge overlapping spans
   (the merged span keeps the rule with the highest severity; on a tie, the
-  earlier rule in load order).
+  earlier rule in load order). That is the definition; the implementation
+  gets the same result faster (§3.2.1).
+- Built-in rules come from `builtin_rules.go`, generated from `patterns.yaml`
+  by `go generate ./internal/rules`, so no YAML is parsed at start-up; a test
+  fails when the two disagree. Their regexes compile on first use. Custom
+  rules are parsed and compiled at load time, so errors point at the file.
+
+#### 3.2.1 How `Find` stays fast
+
+The design follows ripgrep and secret scanners such as gitleaks: search for
+literals first, run regexes only where a match is still possible.
+
+1. **One keyword pass.** All keywords of all rules form one Aho-Corasick
+   automaton, compiled to a DFA over a reduced alphabet and matched with
+   ASCII case folding on the fly. A rule runs only when one of its keywords
+   occurs — the same test as `strings.Contains(strings.ToLower(cmd), k)`,
+   without lower-casing or a search per keyword.
+2. **A search plan per rule**, computed from the regex's syntax tree when
+   the rule is first used:
+   - *keyword proof*: every match contains one of the rule's keywords
+     (`(?i)(?:GITHUB_)?TOKEN=…` with keyword `token` qualifies);
+   - *stop bytes*: ASCII non-word bytes no part of the regex can consume
+     (for `ghp_[0-9a-zA-Z]{36}`, every space, quote and punctuation);
+   - *required literals*: sets of literals every match contains (`=`, `://`).
+
+   With a proof and stop bytes, the regex runs only on the stretches between
+   stop bytes that contain a keyword occurrence. No match can cross a stop
+   byte, and because stop bytes are not word characters, `\b` and `\B` see
+   the same thing at a stretch's edge as in the full command. Regexes with
+   `^`, `$`, `\A`, `\z` or `(?s).` are always run on the whole command.
+   A stretch (or command) that lacks one of the required sets is skipped.
+
+   Two shapes get a plan of their own, in which the regex runs anchored at
+   each possible match start, in order, with the rune before the start as
+   context (`\A(?s:.)(?:expr)`), which replays `FindAll` exactly:
+   - *inner literal* (`innerPlan`): `\b NAME \s* = …` where NAME consumes
+     only word bytes, as in `generic_secret_assignment`. Each `=` has one
+     possible start, the start of the word before it (the Rust regex
+     crate's "reverse inner" strategy, adapted to a forward-only engine).
+   - *prefix* (`prefixPlan`): every match begins with one of a few literals,
+     as `curl`, `machine`/`default` or `docker`/`podman`/…; their
+     occurrences are the candidates. In `HEAD X*? REST`, a failed candidate
+     rules out every candidate up to the next byte outside X (`|`, `;`, `&`
+     for `curl … -u`), which keeps the work linear; past a cap on
+     candidates the regex runs over the whole command.
+3. **Fallback.** Three non-ASCII runes case-fold or lower-case to ASCII
+   letters: U+0130, U+017F and U+212A. A command containing one takes the
+   plain path of the definition, as does every command when the keyword
+   automaton would be too large. A rule with a non-ASCII keyword checks its
+   keywords the plain way and runs over the whole command.
+
+`equivalence_test.go` holds a frozen copy of the plain algorithm and checks
+that `Find` returns the same matches on every fixture, on generated commands
+(with the runes above, invalid UTF-8 and stop bytes), on custom rule shapes
+(anchors, `(?s)`, `\B`, empty matches, non-ASCII keywords) and in a fuzz
+target. `SHELLCLEAR_EQUIV_CORPUS=<dir>` adds every line of every file in a
+directory, for example a copy of `~/.claude/projects`.
 - `ValidSecret` trims matching quotes (`'`, `"`) and rejects the secret when it:
   - is empty or shorter than 4 characters;
   - starts with `$`, `${`, `$(`, `<`, or a backtick (the backtick is added, see Q3);
@@ -288,13 +344,25 @@ type Scanner struct {
     Workers int              // default runtime.NumCPU()
 }
 
-func (s *Scanner) ScanBytes(f history.File, data []byte) Result
-func (s *Scanner) ScanFile(fsys FS, f history.File) (Result, error)
+func (s *Scanner) ScanBytes(f history.File, data []byte) (Result, error)
+func (s *Scanner) ScanFile(f history.File) (Result, error)
+func (s *Scanner) ScanFiles(files []history.File, done func(i int, r Result)) error
+
+type Budget struct{ /* counting semaphore over bytes */ }
+func NewBudget(limit int64) *Budget // MaxInFlightBytes = 64 MiB
 ```
 
 Entries are split into chunks of about 2,048. A pool of workers writes into a
 pre-sized slice indexed by entry, so the output order is deterministic without
 sorting. `BenchmarkScan100k` targets less than 1 s on an Apple M1.
+
+`ScanFiles` scans several files at once: `--ai` often means hundreds of
+session files. Results are delivered with their index, so callers keep the
+file order, and the error returned is the one of the first failing file, as
+in a sequential loop. A byte budget (`MaxInFlightBytes`, 64 MiB of files)
+bounds the data held at once, so peak memory stays near what one large file
+needs. `motd` checks its files the same way and updates the
+cache afterwards, in file order.
 
 ### 3.4 `internal/cleaner`
 

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devops247-online/shellclear/internal/config"
@@ -315,28 +317,44 @@ func (a *App) cmdFind(g *globals, args []string) (int, error) {
 	}
 
 	sc := &scan.Scanner{Rules: set, Allow: cfg.Allow}
-	var results []scan.Result
-	for _, hf := range files {
-		start := time.Now()
-		r, err := sc.ScanFile(hf)
-		if err != nil {
-			return exitError, err
-		}
+	results := make([]scan.Result, len(files))
+	entries := make([]int, len(files))
+	// Files finish in any order; --verbose reports them in file order, each
+	// as soon as every file before it is done.
+	var mu sync.Mutex
+	finished := make([]bool, len(files))
+	reported := 0
+	err = sc.ScanFiles(files, func(i int, r scan.Result) {
 		r.Findings = scan.FilterSeverity(r.Findings, minSev)
-		a.verbosef(g, "scanned %s: %d entries, %d findings in %s", hf.Path, len(r.Entries), len(r.Findings), time.Since(start).Round(time.Millisecond))
+		entries[i] = len(r.Entries)
 		// Only findings are reported. AI transcripts can add up to
 		// gigabytes, so do not keep every file in memory.
 		r.Data, r.Entries = nil, nil
-		results = append(results, r)
+		mu.Lock()
+		defer mu.Unlock()
+		results[i], finished[i] = r, true
+		for ; reported < len(files) && finished[reported]; reported++ {
+			res := results[reported]
+			a.verbosef(g, "scanned %s: %d entries, %d findings in %s", files[reported].Path, entries[reported], len(res.Findings), res.Elapsed.Round(time.Millisecond))
+		}
+	})
+	if err != nil {
+		return exitError, err
 	}
 
 	opt := output.Options{Color: a.colorOn(g), Fancy: a.StdoutIsTTY, Location: a.Location, Home: a.Env.Home}
+	// The report is complete before it is printed: write it in one go, not
+	// one system call per line.
+	out := bufio.NewWriterSize(a.Stdout, 64<<10)
 	if f == output.Text && a.StdoutIsTTY && !g.noBanner {
-		if err := output.Banner(a.Stdout, version, opt.Color); err != nil {
+		if err := output.Banner(out, version, opt.Color); err != nil {
 			return exitError, err
 		}
 	}
-	if err := output.Write(a.Stdout, f, results, opt); err != nil {
+	if err := output.Write(out, f, results, opt); err != nil {
+		return exitError, err
+	}
+	if err := out.Flush(); err != nil {
 		return exitError, err
 	}
 	if output.Summarize(results).Commands > 0 {

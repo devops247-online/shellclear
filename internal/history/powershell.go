@@ -22,7 +22,7 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 func (powershellCodec) Shell() Shell { return PowerShell }
 
 func (c powershellCodec) Parse(data []byte) []Entry {
-	var entries []Entry
+	entries := make([]Entry, 0, maxRecords(data))
 	it := lineIter{data: data}
 	line := 1
 	for {

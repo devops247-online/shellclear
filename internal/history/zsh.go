@@ -28,7 +28,7 @@ func zshIsMeta(b byte) bool { return b == 0 || (b >= 0x83 && b <= 0xA2) }
 func (zshCodec) Shell() Shell { return Zsh }
 
 func (c zshCodec) Parse(data []byte) []Entry {
-	var entries []Entry
+	entries := make([]Entry, 0, maxRecords(data))
 	it := lineIter{data: data}
 	line := 1
 	for {
@@ -93,7 +93,12 @@ func (zshCodec) encodeSpan(s string) []byte {
 
 // zshDecodeCommand joins continuation lines and unmetafies.
 func zshDecodeCommand(b []byte) string {
-	return string(zshUnmetafy(bytes.ReplaceAll(b, []byte("\\\n"), []byte("\n"))))
+	// bytes.ReplaceAll copies even when there is nothing to replace, and
+	// most commands are a single line.
+	if bytes.Contains(b, []byte("\\\n")) {
+		b = bytes.ReplaceAll(b, []byte("\\\n"), []byte("\n"))
+	}
+	return string(zshUnmetafy(b))
 }
 
 // zshProtectedEnd reports whether b ends in a backslash followed by at least

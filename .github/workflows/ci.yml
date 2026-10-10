@@ -95,14 +95,19 @@ jobs:
           go-version: stable
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13.2
+          version: v2.14.0
 
   fuzz:
     name: fuzz (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
-        target: [FuzzZshParse, FuzzBashParse, FuzzFishParse, FuzzPowerShellParse, FuzzJSONParse, FuzzJSONWriter, FuzzShellWriters]
+        target: [FuzzZshParse, FuzzBashParse, FuzzFishParse, FuzzPowerShellParse, FuzzJSONParse, FuzzJSONWriter, FuzzShellWriters, FuzzJSONUnquote]
+        pkg: [history]
+        include:
+          # The fast path of rules.Set.Find against the plain algorithm.
+          - target: FuzzFindEquivalence
+            pkg: rules
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,13 +115,13 @@ jobs:
         with:
           go-version: stable
       - name: fuzz for 30 seconds
-        run: go test ./internal/history/ -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 30s
+        run: go test ./internal/${{ matrix.pkg }}/ -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 30s
       - name: keep failing inputs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-${{ matrix.target }}
-          path: internal/history/testdata/fuzz
+          path: internal/${{ matrix.pkg }}/testdata/fuzz
 
   security:
     # One job per scanner so they run in parallel; see scripts/security-scan.sh.

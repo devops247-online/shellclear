@@ -6,8 +6,8 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/devops247-online/shellclear/internal/history"
@@ -48,6 +48,7 @@ type Result struct {
 	Data     []byte
 	Entries  []history.Entry
 	Findings []Finding
+	Elapsed  time.Duration // reading and scanning, for ScanFile and ScanFiles
 }
 
 // Scanner finds secrets in history files.
@@ -59,11 +60,132 @@ type Scanner struct {
 
 // ScanFile reads and scans one history file.
 func (s *Scanner) ScanFile(f history.File) (Result, error) {
+	start := time.Now()
 	data, err := os.ReadFile(f.RealPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s: %w", f.Path, err)
 	}
-	return s.ScanBytes(f, data)
+	r, err := s.ScanBytes(f, data)
+	r.Elapsed = time.Since(start)
+	return r, err
+}
+
+// MaxInFlightBytes bounds how many bytes of files are being scanned at once
+// when files are read concurrently. Parsed entries and decoded commands take
+// several times the file size again, so this keeps peak memory near what
+// scanning one large file needs. AI transcripts can add up to gigabytes; a
+// file larger than this is scanned on its own.
+const MaxInFlightBytes = 64 << 20
+
+// ScanFiles reads and scans files, up to Workers files at a time and up to
+// MaxInFlightBytes of them, and calls done with each result as soon as it is
+// ready. done may run concurrently for different files; i is the file's
+// index, so results can be stored in input order. After a failure no further
+// file is started, and the error returned is the one of the first failing
+// file in input order: the same error a one-by-one loop over ScanFile would
+// return.
+func (s *Scanner) ScanFiles(files []history.File, done func(i int, r Result)) error {
+	workers := s.workers()
+	if workers > len(files) {
+		workers = len(files)
+	}
+	mem := NewBudget(MaxInFlightBytes)
+	errs := make([]error, len(files))
+	var next atomic.Int64
+	var stopAt atomic.Int64 // index of the first failure seen so far
+	stopAt.Store(int64(len(files)))
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1) - 1)
+				if i >= len(files) || int64(i) > stopAt.Load() {
+					return
+				}
+				var size int64
+				if fi, err := os.Stat(files[i].RealPath); err == nil {
+					size = fi.Size()
+				}
+				size = mem.Acquire(size)
+				if int64(i) > stopAt.Load() {
+					// An earlier file failed while this one waited.
+					mem.Release(size)
+					return
+				}
+				r, err := s.ScanFile(files[i])
+				if err == nil {
+					done(i, r)
+				}
+				mem.Release(size)
+				if err != nil {
+					errs[i] = err
+					for {
+						cur := stopAt.Load()
+						if int64(i) >= cur || stopAt.CompareAndSwap(cur, int64(i)) {
+							break
+						}
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Budget is a counting semaphore over bytes.
+type Budget struct {
+	mu    sync.Mutex
+	cond  *sync.Cond
+	limit int64
+	used  int64
+}
+
+// NewBudget returns a budget of limit bytes.
+func NewBudget(limit int64) *Budget {
+	b := &Budget{limit: limit}
+	b.cond = sync.NewCond(&b.mu)
+	return b
+}
+
+// Acquire waits until n bytes are free and takes them. A request larger than
+// the limit takes the whole budget. It returns what it took, which is what
+// Release must be given back.
+func (b *Budget) Acquire(n int64) int64 {
+	n = min(max(n, 0), b.limit)
+	b.mu.Lock()
+	for b.used+n > b.limit {
+		b.cond.Wait()
+	}
+	b.used += n
+	b.mu.Unlock()
+	return n
+}
+
+// Release returns bytes taken by Acquire.
+func (b *Budget) Release(n int64) {
+	b.mu.Lock()
+	b.used -= n
+	b.mu.Unlock()
+	b.cond.Broadcast()
+}
+
+// Parallelism is the number of files, or of chunks of one file, that are
+// scanned at once: Workers, or runtime.NumCPU() when Workers is not set.
+func (s *Scanner) Parallelism() int { return s.workers() }
+
+func (s *Scanner) workers() int {
+	if s.Workers <= 0 {
+		return runtime.NumCPU()
+	}
+	return s.Workers
 }
 
 // ScanBytes scans history data in the format of f.Shell.
@@ -79,10 +201,7 @@ func (s *Scanner) ScanBytes(f history.File, data []byte) (Result, error) {
 // ScanEntries returns findings for entries, ordered by entry index.
 func (s *Scanner) ScanEntries(entries []history.Entry) []Finding {
 	matches := make([][]rules.Match, len(entries))
-	workers := s.Workers
-	if workers <= 0 {
-		workers = runtime.NumCPU()
-	}
+	workers := s.workers()
 	chunks := chunkStarts(entries)
 	if workers > len(chunks) {
 		workers = len(chunks)
@@ -145,7 +264,7 @@ func (s *Scanner) scanRange(entries []history.Entry, out [][]rules.Match, start,
 		if e.Opaque || e.Command == "" {
 			continue
 		}
-		ms := s.Rules.FindWithLower(e.Command, strings.ToLower(e.Command))
+		ms := s.Rules.Find(e.Command)
 		if len(ms) == 0 || s.allowed(e.Command) {
 			continue
 		}

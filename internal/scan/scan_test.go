@@ -2,12 +2,14 @@ package scan
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/devops247-online/shellclear/internal/history"
 	"github.com/devops247-online/shellclear/internal/rules"
@@ -132,4 +134,123 @@ func BenchmarkScan100k(b *testing.B) {
 	}
 }
 
+// syntheticJSONL builds n lines shaped like an AI assistant session
+// transcript: long JSON lines whose string values hold prose, code and command
+// output, with words such as "token", "password" and "key" in ordinary text
+// and, on every 97th line, a real-looking token.
+func syntheticJSONL(n int) []byte {
+	prose := []string{
+		"The token bucket refills every second; the password policy requires rotation.",
+		"Run the migration, then check that the API key header is forwarded by the proxy.",
+		"I updated the config so the secret store is read lazily and the cache key includes the tenant.",
+		"Let me look at how the login flow handles the access token refresh on expiry.",
+		"The test failed because the private key fixture was regenerated with a different curve.",
+	}
+	code := []string{
+		"func (s *Server) auth(r *http.Request) error {\n\ttok := r.Header.Get(\"Authorization\")\n\tif tok == \"\" {\n\t\treturn errNoToken\n\t}\n\treturn s.verify(tok)\n}",
+		"const config = { apiKey: process.env.API_KEY, timeout: 3000, retries: 2 };\nexport default config;",
+		"$ kubectl get secret app-secrets -o yaml | grep -c data\n4\n$ curl -s https://api.internal/v1/health | jq .status\n\"ok\"",
+		"SELECT id, email, password_hash FROM users WHERE last_login < now() - interval '90 days';",
+	}
+	var b bytes.Buffer
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-09-21T17:13:%02d.000Z","uuid":"%08x-0000","message":{"role":"assistant","content":[`, i%60, i)
+		for j := 0; j < 1+i%7; j++ {
+			if j > 0 {
+				b.WriteByte(',')
+			}
+			text := prose[(i+j)%len(prose)]
+			if (i+j)%3 == 0 {
+				text = code[(i+j)%len(code)]
+			}
+			text = strings.Repeat(text+" ", 1+(i+j)%9)
+			if i%97 == 0 && j == 0 {
+				text = fmt.Sprintf("export GITHUB_TOKEN=ghp_%036d", i)
+			}
+			quoted, _ := json.Marshal(text)
+			fmt.Fprintf(&b, `{"type":"text","text":%s}`, quoted)
+		}
+		b.WriteString("]}}\n")
+	}
+	return b.Bytes()
+}
+
+func BenchmarkScanJSONL(b *testing.B) {
+	data := syntheticJSONL(20000)
+	f := history.File{Shell: history.JSON}
+	sc := &Scanner{Rules: builtinSet(b)}
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := sc.ScanBytes(f, data); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestSyntheticJSONLFindings(t *testing.T) {
+	r, err := (&Scanner{Rules: builtinSet(t)}).ScanBytes(history.File{Shell: history.JSON}, syntheticJSONL(2000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Findings) != 21 { // every 97th line carries a token
+		t.Fatalf("got %d findings", len(r.Findings))
+	}
+}
+
 func TestMain(m *testing.M) { os.Exit(m.Run()) }
+
+func TestScanFilesOrderAndFirstError(t *testing.T) {
+	dir := t.TempDir()
+	var files []history.File
+	for i := 0; i < 40; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("h%02d", i))
+		content := fmt.Sprintf(": %d:0;echo %d\n", 1700000000+i, i)
+		if i%3 == 0 {
+			content += ": 1:0;export GITHUB_TOKEN=ghp_" + strings.Repeat("a", 36) + "\n"
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, history.File{Path: p, RealPath: p, Shell: history.Zsh})
+	}
+	sc := &Scanner{Rules: builtinSet(t), Workers: 8}
+	got := make([]int, len(files))
+	if err := sc.ScanFiles(files, func(i int, r Result) { got[i] = len(r.Findings) }); err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range got {
+		if want := map[bool]int{true: 1, false: 0}[i%3 == 0]; n != want {
+			t.Fatalf("file %d: %d findings, want %d", i, n, want)
+		}
+	}
+
+	// Two missing files: the error is always the first one's, as in a loop.
+	bad := append([]history.File(nil), files...)
+	for _, i := range []int{7, 23} {
+		bad[i] = history.File{Path: fmt.Sprintf("missing%d", i), RealPath: filepath.Join(dir, fmt.Sprintf("missing%d", i)), Shell: history.Zsh}
+	}
+	for round := 0; round < 20; round++ {
+		err := sc.ScanFiles(bad, func(int, Result) {})
+		if err == nil || !strings.Contains(err.Error(), "missing7") {
+			t.Fatalf("round %d: err = %v, want the error for missing7", round, err)
+		}
+	}
+}
+
+func TestBudget(t *testing.T) {
+	b := NewBudget(100)
+	if got := b.Acquire(500); got != 100 {
+		t.Fatalf("oversized request took %d", got)
+	}
+	done := make(chan struct{})
+	go func() { b.Acquire(10); close(done) }()
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("Acquire did not wait for a full budget")
+	default:
+	}
+	b.Release(100)
+	<-done
+}

@@ -386,8 +386,9 @@ shellclear config init --import-legacy
 ```sh
 make test       # go test -race -cover ./...
 make lint       # golangci-lint
-make fuzz       # fuzz every history codec (FUZZTIME=30s each)
-make bench      # BenchmarkScan100k
+make fuzz       # fuzz every history codec and the rule matcher (FUZZTIME=30s each)
+make bench      # scanning, rule matching and motd benchmarks
+make generate   # rebuild the built-in rule table after editing patterns.yaml
 make security   # supply-chain and vulnerability checks, in parallel
 make snapshot   # build all release artifacts into dist/ without publishing
 ```
@@ -396,6 +397,10 @@ Run `make hooks` once after cloning. It installs a [pre-commit](https://pre-comm
 hook that runs Trivy and blocks the commit when Trivy reports a finding.
 
 Scanning 100,000 history records with all rules takes about 26 ms on an Apple M4 Max.
+On a 4-core cloud VM, `find --ai` reads 100 MB of Claude Code transcripts in about
+0.3 s and a 12 MB zsh history in about 0.1 s, and a cached `motd` adds well under a
+millisecond to the process start-up. How matching stays fast without changing what it
+finds is described in [docs/DESIGN.md](docs/DESIGN.md#321-how-find-stays-fast).
 
 The project uses only the Go standard library plus `gopkg.in/yaml.v3`. Commit messages
 follow [Conventional Commits](https://www.conventionalcommits.org/).
@@ -425,7 +430,7 @@ and deleting `main` are blocked, with no bypass for administrators.
 |---|---|
 | `test` | `go vet` and `go test -race` on Linux and macOS, with Go 1.22 and the latest stable Go. Coverage of `internal/` must stay at 80% or more, and the binary must build. |
 | `lint` | [golangci-lint](https://golangci-lint.run). |
-| `fuzz` | 30 seconds of fuzzing for every history format: zsh, bash, fish, PowerShell and JSON parsers, and the writers. Failing inputs are kept as artifacts. |
+| `fuzz` | 30 seconds of fuzzing for every history format: zsh, bash, fish, PowerShell and JSON parsers, and the writers; and for the rule matcher, against the plain matching algorithm. Failing inputs are kept as artifacts. |
 | `security` | The six checks below, one job each, in parallel. |
 | `release-dry-run` | A full GoReleaser build of every archive, and the Homebrew formula is rendered and checked. |
 

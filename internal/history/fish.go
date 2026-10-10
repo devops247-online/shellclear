@@ -26,7 +26,7 @@ var fishCmdPrefix = []byte("- cmd")
 func (fishCodec) Shell() Shell { return Fish }
 
 func (c fishCodec) Parse(data []byte) []Entry {
-	var entries []Entry
+	entries := make([]Entry, 0, bytes.Count(data, fishCmdPrefix)+1)
 	it := lineIter{data: data}
 	curStart, curLine, line := 0, 1, 1
 	curOpaque := true
